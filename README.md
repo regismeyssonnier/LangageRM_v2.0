@@ -9,3 +9,5 @@
 ## How it works ?
 
 It uses ANTLR for parser File and LLVM to create the code, and finally clang or gcc to create the .exe file
+
+You have to install LLVM for windows and llvmlite for python.
