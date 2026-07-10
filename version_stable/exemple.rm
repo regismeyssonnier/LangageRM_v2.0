@@ -1,0 +1,209 @@
+// ============================================================
+// EXEMPLE COMPLET AVEC TOUTES LES FONCTIONNALITES
+// ============================================================
+
+// --- Fonctions mathematiques ---
+func bool EstPair(int n) {
+    return (n % 2 == 0);
+}
+
+func bool EstPremier(int n) {
+    if (n <= 1) {
+        return false;
+    }
+    int i = 2;
+    while (i * i <= n) {
+        if (n % i == 0) {
+            return false;
+        }
+        i = i + 1;
+    }
+    return true;
+}
+
+func int Factorielle(int n) {
+    if (n <= 1) {
+        return 1;
+    } else {
+        return n * Factorielle(n - 1);
+    }
+}
+
+func int Fibonacci(int n) {
+    if (n <= 1) {
+        return n;
+    } else {
+        return Fibonacci(n - 1) + Fibonacci(n - 2);
+    }
+}
+
+// --- Classe Personne ---
+class Personne {
+    string nom;
+    int age;
+    
+    constructor Personne(string nom, int age) {
+        this.nom = nom;
+        this.age = age;
+    }
+    
+    func void Afficher() {
+        print("Nom: ");
+        println(this.nom);
+        print("Age: ");
+        println(this.age);
+    }
+    
+    func string GetNom() {
+        return this.nom;
+    }
+}
+
+// --- Classe Rectangle ---
+class Rectangle {
+    double largeur;
+    double hauteur;
+    
+    constructor Rectangle(double largeur, double hauteur) {
+        this.largeur = largeur;
+        this.hauteur = hauteur;
+    }
+    
+    func double CalculerAire() {
+        return this.largeur * this.hauteur;
+    }
+    
+    func void Afficher() {
+        print("Rectangle: ");
+        print(this.largeur);
+        print(" x ");
+        println(this.hauteur);
+        print("Aire: ");
+        println(this.CalculerAire());
+    }
+}
+
+// --- Fonction principale ---
+func int main() {
+    println("=========================================");
+    println("  BIENVENUE DANS LE LANGAGE RM");
+    println("=========================================");
+    println("");
+
+    // --- Variables ---
+    println("--- Variables ---");
+    println("");
+    
+    int x = 10;
+    int y = 20;
+    string msg = "Hello RM!";
+    bool vrai = true;
+    bool faux = false;
+    
+    print("x = ");
+    println(x);
+    print("y = ");
+    println(y);
+    print("msg = ");
+    println(msg);
+    print("vrai = ");
+    println(vrai);
+    print("faux = ");
+    println(faux);
+    println("");
+
+    // --- Fonctions ---
+    println("--- Fonctions ---");
+    println("");
+    
+    bool pair = EstPair(4);
+    print("EstPair(4) = ");
+    println(pair);
+    
+    bool premier = EstPremier(7);
+    print("EstPremier(7) = ");
+    println(premier);
+    
+    int fact = Factorielle(5);
+    print("Factorielle(5) = ");
+    println(fact);
+    
+    int fib = Fibonacci(10);
+    print("Fibonacci(10) = ");
+    println(fib);
+    println("");
+
+    // --- Boucle while ---
+    println("--- Boucle while ---");
+    println("");
+    
+    int i = 0;
+    while (i < 5) {
+        print("i = ");
+        println(i);
+        i = i + 1;
+    }
+    println("");
+
+    // --- Boucle for ---
+    println("--- Boucle for ---");
+    println("");
+    
+    for (int j = 0; j < 5; j = j + 1) {
+        print("j = ");
+        println(j);
+    }
+    println("");
+
+    // --- Condition ---
+    println("--- Condition ---");
+    println("");
+    
+    if (x < y) {
+        println("x est plus petit que y");
+    } else {
+        println("x est plus grand que y");
+    }
+    println("");
+
+    // --- Nombres premiers avec boucle ---
+    println("--- Nombres premiers de 2 a 20 ---");
+    println("");
+    
+    int n = 2;
+    while (n < 20) {
+        if (EstPremier(n)) {
+            print(n);
+            println(" est premier");
+        }
+        n = n + 1;
+    }
+    println("");
+
+    // --- Classe Personne ---
+    println("--- Classe Personne ---");
+    println("");
+    
+    Personne p = Personne("Alice", 25);
+    p.Afficher();
+    println("");
+    
+    print("Nom via GetNom(): ");
+    println(p.GetNom());
+    println("");
+
+    // --- Classe Rectangle ---
+    println("--- Classe Rectangle ---");
+    println("");
+    
+    Rectangle r = Rectangle(5.0, 3.0);
+    r.Afficher();
+    println("");
+
+    // --- Fin ---
+    println("=========================================");
+    println("  FIN DU PROGRAMME");
+    println("=========================================");
+
+    return 0;
+}

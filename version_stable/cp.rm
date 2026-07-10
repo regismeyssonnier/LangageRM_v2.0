@@ -1,0 +1,15 @@
+// test_recursion.rm
+func int Factorielle(int n) {
+    if (n <= 1) {
+        return 1;
+    } else {
+        return n * Factorielle(n - 1);
+    }
+}
+
+func int main() {
+    int f = Factorielle(5);
+    print("Factorielle(5) = ");
+    println(f);
+    return 0;
+}
