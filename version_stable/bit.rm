@@ -1,0 +1,34 @@
+ func int main() {
+    int a = 12;    // 12
+    int b = 10;    // 10
+        
+    // Opérateurs binaires
+    int c = a & b;     // 8 (1000)
+    int d = a | b;     // 14 (1110)
+    int e = a ^ b;     // 6 (0110)
+    int f = ~a;        // -13
+    int g = a << 1;    // 24
+    int h = a >> 2;    // 3
+        
+    // Affectations composées
+    int flags = 0;
+    flags |= 15;     // flags = 15
+    flags &= 10;     // flags = 10
+    flags ^= 255;     // flags = 245
+    flags <<= 1;       // flags = 490
+    flags >>= 1;       // flags = 245
+    flags += 10;
+           
+    println(a);
+    println(b);
+    println(c);
+    println(d);
+    println(e);
+    println(f);
+    println(g);
+    println(h);
+    println(flags);
+        
+    return 0;
+}
+

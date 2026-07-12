@@ -3,6 +3,7 @@
 
 import sys
 import os
+import re
 import subprocess
 from antlr4 import *
 from llvmlite import ir, binding
@@ -204,12 +205,11 @@ class CompilateurLLVM(RmLangVisitor):
     def _get_struct_type(self, classe):
         if classe in self.struct_types:
             return self.struct_types[classe]
-    
         membres = self.classes[classe]['membres']
-        # Le premier champ est le pointeur vtable
-        types = [self.void_ptr]  # vtable
+        types = [self.void_ptr]
         for m in membres:
-            t = self._get_llvm_type(m['type'])
+            elem_type = self._get_llvm_type(m['type'])
+            t = ir.ArrayType(elem_type, m.get('array_size', 1)) if m.get('is_array') else elem_type
             types.append(t)
         struct_type = ir.LiteralStructType(types)
         self.struct_types[classe] = struct_type
@@ -247,63 +247,62 @@ class CompilateurLLVM(RmLangVisitor):
     def _creer_fonction_methode(self, classe, nom, info):
         type_retour = info['type_retour']
         params = info['params']
+        param_names = info['param_names']    # déjà présent dans info, juste pas utilisé
         param_types = info['param_types']
-    
+
         return_type = self._get_llvm_type(type_retour) if type_retour != 'void' else self.void
         param_types_llvm = [self.void_ptr]
         for p in param_types:
             param_types_llvm.append(self._get_llvm_type(p))
-    
+
         func_type = ir.FunctionType(return_type, param_types_llvm)
         func_name = self._clean_name(classe + "_" + nom)
         func = ir.Function(self.module, func_type, name=func_name)
-    
+
         func.args[0].name = "this"
-        for i, p_name in enumerate(params):
+        for i, p_name in enumerate(param_names):        # CORRIGÉ : param_names
             func.args[i + 1].name = self._clean_name(p_name)
-    
+
         entry_block = func.append_basic_block("entry")
         old_builder = self.builder
         old_vars = dict(self.variables)
-        old_var_types = dict(self.var_types)  # Sauvegarder
+        old_var_types = dict(self.var_types)
         old_obj = self.objet_courant
         old_classe = self.classe_courante
-    
+
         self.builder = ir.IRBuilder(entry_block)
         self.variables = {}
-        self.var_types = {}  # Réinitialiser
+        self.var_types = {}
         self.objet_courant = func.args[0]
         self.classe_courante = classe
-    
-        # Enregistrer le type de 'this'
+
         self.var_types['this'] = classe
-    
-        for i, p_name in enumerate(params):
+
+        for i, p_name in enumerate(param_names):        # CORRIGÉ : param_names
             clean_name = self._clean_name(p_name)
             llvm_type = self._get_llvm_type(param_types[i])
             ptr = self.builder.alloca(llvm_type, name=clean_name)
             self.builder.store(func.args[i + 1], ptr)
             self.variables[clean_name] = ptr
-        
-            # NOUVEAU: Enregistrer le type si c'est un objet
+
             p_type = param_types[i]
             if p_type not in ('int', 'double', 'float', 'string', 'bool', 'char', 'void'):
                 self.var_types[clean_name] = p_type
-    
+
         self.visit(info['corps'])
-    
+
         if not self.builder.block.is_terminated:
             if type_retour == 'void':
                 self.builder.ret_void()
             else:
                 self.builder.ret(ir.Constant(return_type, 0))
-    
+
         self.builder = old_builder
         self.variables = old_vars
-        self.var_types = old_var_types  # Restaurer
+        self.var_types = old_var_types
         self.objet_courant = old_obj
         self.classe_courante = old_classe
-    
+
         return func
     
     def _creer_objet(self, classe, args):
@@ -324,10 +323,20 @@ class CompilateurLLVM(RmLangVisitor):
         vtable_field = self.builder.gep(ptr, [ir.Constant(self.i32, 0), ir.Constant(self.i32, 0)])
         vtable_ptr_cast = self.builder.bitcast(vtable_ptr, self.void_ptr)
         self.builder.store(vtable_ptr_cast, vtable_field)
-    
+
         for i in range(len(self.classes[classe]['membres'])):
             field_ptr = self.builder.gep(ptr, [ir.Constant(self.i32, 0), ir.Constant(self.i32, i + 1)])
-            m_type = self.classes[classe]['membres'][i]['type']
+            membre = self.classes[classe]['membres'][i]
+            m_type = membre['type']
+
+            if membre.get('is_array'):
+                elem_type = self._get_llvm_type(m_type)
+                for j in range(membre.get('array_size', 1)):
+                    elem_ptr = self.builder.gep(field_ptr, [ir.Constant(self.i32, 0), ir.Constant(self.i32, j)])
+                    zero_val = ir.Constant(self.double, 0.0) if isinstance(elem_type, ir.DoubleType) else ir.Constant(elem_type, 0)
+                    self.builder.store(zero_val, elem_ptr)
+                continue
+    
             if m_type == 'int':
                 self.builder.store(ir.Constant(self.i32, 0), field_ptr)
             elif m_type == 'double':
@@ -412,15 +421,25 @@ class CompilateurLLVM(RmLangVisitor):
         field_ptr = self.builder.gep(obj_struct, [ir.Constant(self.i32, 0), ir.Constant(self.i32, idx)])
         self.builder.store(valeur, field_ptr)
     
+    def _get_membre_info(self, classe, champ):
+        for m in self.classes[classe]['membres']:
+            if m['nom'] == champ:
+                return m
+        return None
+
     def _load_field(self, obj_ptr, classe, champ):
         idx = self._get_field_index(classe, champ)
         if idx == -1:
             return ir.Constant(self.i32, 0)
         struct_type = self._get_struct_type(classe)
-        if struct_type is None:
-            return ir.Constant(self.i32, 0)
         obj_struct = self.builder.bitcast(obj_ptr, struct_type.as_pointer())
         field_ptr = self.builder.gep(obj_struct, [ir.Constant(self.i32, 0), ir.Constant(self.i32, idx)])
+
+        membre = self._get_membre_info(classe, champ)
+        if membre and membre.get('is_array'):
+            zero = ir.Constant(self.i32, 0)
+            return self.builder.gep(field_ptr, [zero, zero])   # décayage en i8*
+
         return self.builder.load(field_ptr)
     
     def _call_method(self, obj_ptr, methode, args):
@@ -446,6 +465,349 @@ class CompilateurLLVM(RmLangVisitor):
         
         call_args = [obj_ptr] + args
         return self.builder.call(func_ptr, call_args)
+
+    # ============================================================
+    # 
+    #      NOUVELLES FONCTIONS : OPÉRATEURS BINAIRES           
+    #
+    # ============================================================
+    
+    def _bitwise_cast_to_same_width(self, gauche, droite):
+        """
+        [NOUVEAU] Convertit deux entiers à la même largeur pour les opérations binaires.
+        """
+        if gauche.type.width < droite.type.width:
+            gauche = self.builder.sext(gauche, droite.type)
+        elif droite.type.width < gauche.type.width:
+            droite = self.builder.sext(droite, gauche.type)
+        return gauche, droite
+    
+    def _ensure_int(self, val, nom_operateur):
+        """
+        [NOUVEAU] Vérifie qu'une valeur est un entier, lève une erreur sinon.
+        """
+        if not self._is_int(val):
+            raise TypeError(f"L'opérateur '{nom_operateur}' nécessite des opérandes entières")
+        return val
+    
+    # ============================================================
+    # VISITEURS DES OPÉRATEURS BINAIRES
+    # ============================================================
+    
+    def visitBitwiseNotExpr(self, ctx):
+        """
+        [NOUVEAU] ~expression
+        Complément à 1 (inverse tous les bits)
+        """
+        valeur = self.visit(ctx.expression())
+        self._ensure_int(valeur, '~')
+        
+        # ~x = x ^ -1 (XOR avec tous les bits à 1)
+        masque = ir.Constant(valeur.type, -1)
+        return self.builder.xor(valeur, masque)
+    
+    def visitLeftShiftExpr(self, ctx):
+        """
+        [NOUVEAU] expression << expression
+        Décalage gauche
+        """
+        gauche = self.visit(ctx.expression(0))
+        droite = self.visit(ctx.expression(1))
+        
+        self._ensure_int(gauche, '<<')
+        self._ensure_int(droite, '<<')
+        
+        gauche, droite = self._bitwise_cast_to_same_width(gauche, droite)
+        return self.builder.shl(gauche, droite)
+    
+    def visitRightShiftExpr(self, ctx):
+        """
+        [NOUVEAU] expression >> expression
+        Décalage droite arithmétique (préserve le signe)
+        """
+        gauche = self.visit(ctx.expression(0))
+        droite = self.visit(ctx.expression(1))
+        
+        self._ensure_int(gauche, '>>')
+        self._ensure_int(droite, '>>')
+        
+        gauche, droite = self._bitwise_cast_to_same_width(gauche, droite)
+        return self.builder.ashr(gauche, droite)
+    
+    def visitBitwiseAndExpr(self, ctx):
+        """
+        [NOUVEAU] expression & expression
+        ET binaire
+        """
+        gauche = self.visit(ctx.expression(0))
+        droite = self.visit(ctx.expression(1))
+        
+        self._ensure_int(gauche, '&')
+        self._ensure_int(droite, '&')
+        
+        gauche, droite = self._bitwise_cast_to_same_width(gauche, droite)
+        return self.builder.and_(gauche, droite)
+    
+    def visitBitwiseXorExpr(self, ctx):
+        """
+        [NOUVEAU] expression ^ expression
+        OU exclusif binaire (XOR)
+        """
+        gauche = self.visit(ctx.expression(0))
+        droite = self.visit(ctx.expression(1))
+        
+        self._ensure_int(gauche, '^')
+        self._ensure_int(droite, '^')
+        
+        gauche, droite = self._bitwise_cast_to_same_width(gauche, droite)
+        return self.builder.xor(gauche, droite)
+    
+    def visitBitwiseOrExpr(self, ctx):
+        """
+        [NOUVEAU] expression | expression
+        OU binaire
+        """
+        gauche = self.visit(ctx.expression(0))
+        droite = self.visit(ctx.expression(1))
+        
+        self._ensure_int(gauche, '|')
+        self._ensure_int(droite, '|')
+        
+        gauche, droite = self._bitwise_cast_to_same_width(gauche, droite)
+        return self.builder.or_(gauche, droite)
+    
+    # ============================================================
+    # VISITEUR CORRIGÉ POUR LES AFFECTATIONS COMPOSÉES
+    # ============================================================
+
+    def visitSimpleCompoundAssign(self, ctx):
+        """
+        [NOUVEAU - CORRIGÉ] Gère: a += 5;  a &= 0xFF;  a <<= 1;
+        """
+        nom_var = ctx.ID().getText()
+        operateur = ctx.COMPOUND_ASSIGN().getText()
+        droite_val = self.visit(ctx.expression())
+    
+        clean_nom = self._clean_name(nom_var)
+    
+        print(f"[DEBUG] CompoundAssign: {nom_var} {operateur} (valeur droite: {droite_val})")
+    
+        if clean_nom in self.variables:
+            ptr = self.variables[clean_nom]
+        
+            # Charger la valeur actuelle
+            valeur_actuelle = self.builder.load(ptr)
+            print(f"[DEBUG]   Valeur actuelle: {valeur_actuelle}")
+        
+            # Appliquer l'opération
+            nouvelle_valeur = self._appliquer_operation_composee(
+                valeur_actuelle, droite_val, operateur
+            )
+            print(f"[DEBUG]   Nouvelle valeur: {nouvelle_valeur}")
+        
+            # Stocker le résultat
+            self.builder.store(nouvelle_valeur, ptr)
+            return nouvelle_valeur
+    
+        print(f"[DEBUG]   Variable '{clean_nom}' non trouvée!")
+        return droite_val
+
+
+    def visitArrayCompoundAssign(self, ctx):
+        """
+        [NOUVEAU - CORRIGÉ] Gère: tab[i] += 5;  tab[i] |= mask;
+        """
+        nom_array = ctx.ID().getText()
+        index = self.visit(ctx.expression(0))
+        operateur = ctx.COMPOUND_ASSIGN().getText()
+        droite_val = self.visit(ctx.expression(1))
+    
+        clean_nom = self._clean_name(nom_array)
+    
+        print(f"[DEBUG] ArrayCompoundAssign: {nom_array}[index] {operateur} {droite_val}")
+    
+        if clean_nom in self.variables:
+            ptr = self.variables[clean_nom]
+        
+            # Calculer l'adresse de l'élément
+            if isinstance(ptr.type.pointee, ir.ArrayType):
+                elem_ptr = self.builder.gep(ptr, [ir.Constant(self.i32, 0), index])
+                valeur_actuelle = self.builder.load(elem_ptr)
+            
+                nouvelle_valeur = self._appliquer_operation_composee(
+                    valeur_actuelle, droite_val, operateur
+                )
+            
+                # Conversion pour char si nécessaire
+                if isinstance(elem_ptr.type.pointee, ir.IntType) and elem_ptr.type.pointee.width == 8:
+                    if isinstance(nouvelle_valeur.type, ir.IntType) and nouvelle_valeur.type.width == 32:
+                        nouvelle_valeur = self.builder.trunc(nouvelle_valeur, self.i8)
+            
+                self.builder.store(nouvelle_valeur, elem_ptr)
+                return nouvelle_valeur
+    
+        return droite_val
+
+
+    def _appliquer_operation_composee(self, gauche, droite, operateur):
+        """
+        [CORRIGÉ] Applique l'opération composée avec gestion correcte des types.
+        """
+        print(f"[DEBUG] _appliquer_operation_composee: gauche={gauche}, droite={droite}, op={operateur}")
+        print(f"[DEBUG]   Type gauche: {gauche.type}, Type droite: {droite.type}")
+    
+        # Ajuster les types si les deux sont des entiers
+        if self._is_int(gauche) and self._is_int(droite):
+            if gauche.type.width != droite.type.width:
+                if gauche.type.width < droite.type.width:
+                    gauche = self.builder.sext(gauche, droite.type)
+                else:
+                    droite = self.builder.sext(droite, gauche.type)
+    
+        # Opérations arithmétiques
+        if operateur == '+=':
+            if self._is_float(gauche) or self._is_float(droite):
+                return self.builder.fadd(self._to_double(gauche), self._to_double(droite))
+            return self.builder.add(gauche, droite)
+    
+        elif operateur == '-=':
+            if self._is_float(gauche) or self._is_float(droite):
+                return self.builder.fsub(self._to_double(gauche), self._to_double(droite))
+            return self.builder.sub(gauche, droite)
+    
+        elif operateur == '*=':
+            if self._is_float(gauche) or self._is_float(droite):
+                return self.builder.fmul(self._to_double(gauche), self._to_double(droite))
+            return self.builder.mul(gauche, droite)
+    
+        elif operateur == '/=':
+            if self._is_float(gauche) or self._is_float(droite):
+                return self.builder.fdiv(self._to_double(gauche), self._to_double(droite))
+            return self.builder.sdiv(gauche, droite)
+    
+        elif operateur == '%=':
+            if self._is_float(gauche) or self._is_float(droite):
+                return self.builder.frem(self._to_double(gauche), self._to_double(droite))
+            return self.builder.srem(gauche, droite)
+    
+        #========================================================
+        #   OPÉRATIONS BINAIRES (CORRIGÉES)    
+        # =======================================================
+    
+        elif operateur == '&=':
+            if not self._is_int(gauche) or not self._is_int(droite):
+                raise TypeError("&= nécessite des entiers")
+            return self.builder.and_(gauche, droite)
+    
+        elif operateur == '|=':
+            if not self._is_int(gauche) or not self._is_int(droite):
+                raise TypeError("|= nécessite des entiers")
+            return self.builder.or_(gauche, droite)
+    
+        elif operateur == '^=':
+            if not self._is_int(gauche) or not self._is_int(droite):
+                raise TypeError("^= nécessite des entiers")
+            return self.builder.xor(gauche, droite)
+    
+        elif operateur == '<<=':
+            if not self._is_int(gauche) or not self._is_int(droite):
+                raise TypeError("<<= nécessite des entiers")
+            return self.builder.shl(gauche, droite)
+    
+        elif operateur == '>>=':
+            if not self._is_int(gauche) or not self._is_int(droite):
+                raise TypeError(">>= nécessite des entiers")
+            return self.builder.ashr(gauche, droite)
+    
+        else:
+            raise NotImplementedError(f"Opérateur composé inconnu : {operateur}")
+    
+    # ============================================================
+    # FONCTIONS SPÉCIALES POUR MANIPULATIONS DE BITS
+    # ============================================================
+    
+    def _bit_test(self, valeur, position):
+        """
+        [NOUVEAU] Teste si le bit à 'position' est 1.
+        Équivalent C: (valeur >> position) & 1
+        Retourne un i1 (booléen LLVM)
+        """
+        decale = self.builder.lshr(valeur, ir.Constant(valeur.type, position))
+        masque = ir.Constant(valeur.type, 1)
+        resultat = self.builder.and_(decale, masque)
+        return self.builder.trunc(resultat, ir.IntType(1))
+    
+    def _bit_set(self, valeur, position):
+        """
+        [NOUVEAU] Met le bit à 'position' à 1.
+        Équivalent C: valeur | (1 << position)
+        """
+        un = ir.Constant(valeur.type, 1)
+        masque = self.builder.shl(un, ir.Constant(valeur.type, position))
+        return self.builder.or_(valeur, masque)
+    
+    def _bit_clear(self, valeur, position):
+        """
+        [NOUVEAU] Met le bit à 'position' à 0.
+        Équivalent C: valeur & ~(1 << position)
+        """
+        un = ir.Constant(valeur.type, 1)
+        masque = self.builder.shl(un, ir.Constant(valeur.type, position))
+        masque_inverse = self.builder.xor(masque, ir.Constant(valeur.type, -1))
+        return self.builder.and_(valeur, masque_inverse)
+    
+    def _bit_toggle(self, valeur, position):
+        """
+        [NOUVEAU] Inverse le bit à 'position'.
+        Équivalent C: valeur ^ (1 << position)
+        """
+        un = ir.Constant(valeur.type, 1)
+        masque = self.builder.shl(un, ir.Constant(valeur.type, position))
+        return self.builder.xor(valeur, masque)
+    
+    # ============================================================
+    # VISITEUR POUR L'AFFECTATION COMPOSÉE (INSTRUCTION)
+    # ============================================================
+    
+    def visitAffectation_composee(self, ctx):
+        """
+        [NOUVEAU] Instruction: a += 5; ou tab[i] &= mask;
+        """
+        operateur = ctx.COMPOUND_ASSIGN().getText()
+        droite_val = self.visit(ctx.expression(len(ctx.expression()) - 1))
+        
+        # Cas 1: Variable simple
+        if ctx.ID() and not ctx.expression(0) if hasattr(ctx, 'expression') else True:
+            nom_var = ctx.ID().getText()
+            clean_nom = self._clean_name(nom_var)
+            
+            if clean_nom in self.variables:
+                ptr = self.variables[clean_nom]
+                valeur_actuelle = self.builder.load(ptr)
+                nouvelle_valeur = self._appliquer_operation_composee(
+                    valeur_actuelle, droite_val, operateur
+                )
+                self.builder.store(nouvelle_valeur, ptr)
+        
+        # Cas 2: Tableau (tab[index] OP= valeur)
+        elif hasattr(ctx, 'expression') and len(ctx.expression()) > 1:
+            nom_array = ctx.ID().getText()
+            clean_nom = self._clean_name(nom_array)
+            index = self.visit(ctx.expression(0))
+            
+            if clean_nom in self.variables:
+                ptr = self.variables[clean_nom]
+                
+                if isinstance(ptr.type.pointee, ir.ArrayType):
+                    elem_ptr = self.builder.gep(ptr, [ir.Constant(self.i32, 0), index])
+                    valeur_actuelle = self.builder.load(elem_ptr)
+                    nouvelle_valeur = self._appliquer_operation_composee(
+                        valeur_actuelle, droite_val, operateur
+                    )
+                    if isinstance(elem_ptr.type.pointee, ir.IntType) and elem_ptr.type.pointee.width == 8:
+                        if isinstance(nouvelle_valeur.type, ir.IntType) and nouvelle_valeur.type.width == 32:
+                            nouvelle_valeur = self.builder.trunc(nouvelle_valeur, self.i8)
+                    self.builder.store(nouvelle_valeur, elem_ptr)
     
     # ============================================================
     # PROGRAMME
@@ -514,9 +876,21 @@ class CompilateurLLVM(RmLangVisitor):
         if self.en_scan_classe:
             if self.classe_courante not in self.classes:
                 self.classes[self.classe_courante] = {'membres': [], 'methodes': {}}
+
+            texte = self._get_original_text(ctx)
+            is_array = bool(re.search(r'\b' + re.escape(nom) + r'\s*\[', texte))
+            array_size = 1
+            if is_array:
+                m = re.search(r'\[([^\]]+)\]', texte)
+                if m:
+                    try:
+                        array_size = int(m.group(1))
+                    except:
+                        array_size = 256
+
             self.classes[self.classe_courante]['membres'].append({
-                'nom': nom,
-                'type': type_var
+                'nom': nom, 'type': type_var,
+                'is_array': is_array, 'array_size': array_size
             })
             return None
 
@@ -524,7 +898,7 @@ class CompilateurLLVM(RmLangVisitor):
         texte = self._get_original_text(ctx)
 
         # Détection tableau
-        import re
+        
         pattern = r'\b' + re.escape(nom) + r'\s*\['
         est_tableau = bool(re.search(pattern, texte))
 
@@ -746,6 +1120,45 @@ class CompilateurLLVM(RmLangVisitor):
     # ============================================================
     # ARRAYS
     # ============================================================
+    def _get_member_array_element_ptr(self, obj_ptr, classe, champ, index):
+        idx = self._get_field_index(classe, champ)
+        if idx == -1:
+            return None
+        struct_type = self._get_struct_type(classe)
+        obj_struct = self.builder.bitcast(obj_ptr, struct_type.as_pointer())
+        field_ptr = self.builder.gep(obj_struct, [ir.Constant(self.i32, 0), ir.Constant(self.i32, idx)])
+        zero = ir.Constant(self.i32, 0)
+        return self.builder.gep(field_ptr, [zero, index])
+
+    def visitMemberArrayAccessExpr(self, ctx):
+        obj_nom = ctx.objectRef().getText()
+        champ = ctx.ID().getText()
+        index = self.visit(ctx.expression())
+        obj_ptr = self._resoudre_objet(obj_nom)
+        classe = self._resoudre_classe(obj_nom)
+        if obj_ptr is None or classe is None:
+            return ir.Constant(self.i32, 0)
+        elem_ptr = self._get_member_array_element_ptr(obj_ptr, classe, champ, index)
+        return self.builder.load(elem_ptr) if elem_ptr else ir.Constant(self.i32, 0)
+
+    def visitAffectation_membre_tableau(self, ctx):
+        obj_nom = ctx.objectRef().getText()
+        champ = ctx.ID().getText()
+        index = self.visit(ctx.expression(0))
+        valeur = self.visit(ctx.expression(1))
+        obj_ptr = self._resoudre_objet(obj_nom)
+        classe = self._resoudre_classe(obj_nom)
+        if obj_ptr is None or classe is None:
+            return None
+        elem_ptr = self._get_member_array_element_ptr(obj_ptr, classe, champ, index)
+        if elem_ptr is None:
+            return None
+        if isinstance(elem_ptr.type.pointee, ir.IntType) and elem_ptr.type.pointee.width == 8:
+            if isinstance(valeur.type, ir.IntType) and valeur.type.width == 32:
+                valeur = self.builder.trunc(valeur, self.i8)
+        self.builder.store(valeur, elem_ptr)
+        return valeur
+
     def visitArrayAccessExpr(self, ctx):
         nom = ctx.ID().getText()
         clean_nom = self._clean_name(nom)
@@ -933,6 +1346,9 @@ class CompilateurLLVM(RmLangVisitor):
     def visitRetour(self, ctx):
         if ctx.expression():
             valeur = self.visit(ctx.expression())
+            if isinstance(valeur.type, ir.PointerType) and isinstance(valeur.type.pointee, ir.ArrayType):
+                zero = ir.Constant(self.i32, 0)
+                valeur = self.builder.gep(valeur, [zero, zero])
             self.builder.ret(valeur)
         else:
             self.builder.ret_void()
@@ -1201,6 +1617,8 @@ class CompilateurLLVM(RmLangVisitor):
     
     def visitForExprInit(self, ctx):
         return self.visit(ctx.expression())
+
+
     
     # ============================================================
     # EXPRESSIONS - AVEC DISPATCH DE TYPE

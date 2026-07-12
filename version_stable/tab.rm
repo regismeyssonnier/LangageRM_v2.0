@@ -20,28 +20,122 @@ class Personne {
 }
 
 class ChaineManage {
-    string var_chaine;
+    char buffer[256];
+    int size = 0;
 
     constructor ChaineManage(string s) {
-        this.var_chaine = s;
+        int ln = 0;
+        while (s[ln]) {
+            char c = s[ln];
+            this.buffer[ln] = c;
+            println(s[ln]);
+            ln = ln + 1;
+        }
+        this.size = ln;
+        this.buffer[ln] = '\0';
+
     }
 
 
     func int Len() {
-        
-        int ln = 0;
-        string vs = this.var_chaine;
-        while (vs[ln]) {
-            ln = ln + 1;
-        }
-        return ln;
-       
+        return this.size;
     }
 
     func string Concat(ChaineManage s) {
-       
-        return this.var_chaine;
+      
+        int i = 0;
+        while (i < s.size) {
+            this.buffer[this.size + i] = s.buffer[i];
+            i = i + 1;
+        }
+        
+        this.size = this.size + s.size;
+        this.buffer[this.size] = '\0';
+        
+          return this.buffer;
+
+
     }
+
+
+}
+
+class TabN {
+    char buffer[100];
+    int size = 0;
+    int w = 0;
+    int h = 0;
+
+    constructor TabN(int w, int h) {
+        this.w = w;
+        this.h = h;
+        
+    }
+
+    func void Set(int x, int y, char val) {
+        this.buffer[y * this.w + x] = val;
+    }
+
+    func char Get(int x, int y) {
+        return this.buffer[y * this.w + x];
+    }
+
+    func void Display() {
+        for (int i = 0; i < this.h; i = i + 1) {
+            for (int j = 0; j < this.w; j = j + 1) {
+                print(this.buffer[i * this.w + j]);
+                print(" ");
+            }println("");
+        }println("");
+    }
+        
+}
+
+class TabN2 {
+    char buffer[1000];  // buffer plus grand pour 3D
+    int size = 0;
+    int w = 0;
+    int h = 0;
+    int d = 0;  // profondeur pour la 3ème dimension
+
+    constructor TabN2(int w, int h, int d) {
+        this.w = w;
+        this.h = h;
+        this.d = d;
+    }
+
+    func void Set(int x, int y, int z, char val) {
+        // Index 3D : z * (w*h) + y * w + x
+        this.buffer[z * this.w * this.h + y * this.w + x] = val;
+    }
+
+    func char Get(int x, int y, int z) {
+        return this.buffer[z * this.w * this.h + y * this.w + x];
+    }
+
+    func void Display() {
+        for (int k = 0; k < this.d; k = k + 1) {
+            println("Couche ", k, ":");
+            for (int i = 0; i < this.h; i = i + 1) {
+                for (int j = 0; j < this.w; j = j + 1) {
+                    print(this.buffer[k * this.w * this.h + i * this.w + j]);
+                    print(" ");
+                }
+                println("");
+            }
+            println("");
+        }
+    }
+}
+
+class math {
+    double number = 0.0;
+
+    constructor math(double n) {
+        this.number = n;
+    }
+
+
 
 
 }
@@ -64,7 +158,38 @@ func int main() {
     // Tableau d'entiers
     int tab[5] = {1, 2, 3, 4, 5};
 
-    char c = 'A';
+    TabN tabn = TabN(10, 10);
+    for (int i = 0; i < tabn.h; i = i + 1) {
+        for (int j = 0; j < tabn.w; j = j + 1) {
+            tabn.Set(j, i, 'z');
+        }
+    }
+
+    tabn.Set(0, 0, 'a');
+    tabn.Set(5, 5, 'b');
+    tabn.Set(9, 9, 'c');
+    char g = tabn.Get(0, 0);
+    println(g);
+    tabn.Display();
+
+    TabN2 tabn2 = TabN2(10, 10, 10);
+    for (int k = 0; k < tabn2.d; k = k + 1) {
+        for (int i = 0; i < tabn2.h; i = i + 1) {
+            for (int j = 0; j < tabn2.w; j = j + 1) {
+                tabn2.Set(j, i, k, 'z');
+            }
+        }
+    }
+
+    tabn2.Set(0, 0, 0, 'a');
+    tabn2.Set(5, 5, 5, 'b');
+    tabn2.Set(9, 9, 9, 'c');
+    char g2 = tabn2.Get(0, 0, 0);
+    println(g2);
+    tabn2.Display();
+       
+
+    char c = 41;
     println(c);
 
     // 2. Buffer et chaîne
@@ -98,12 +223,13 @@ func int main() {
     println(index);
 
     string lr = "Laurent";
-    ChaineManage strtest = ChaineManage("Laurent       ");
+    ChaineManage strtest = ChaineManage("Laurent");
     print("length=");
     int ln = strtest.Len();
     println(ln); 
     ChaineManage strtestc = ChaineManage("Yes");
     string res = strtest.Concat(strtestc);
+    print("res=");
     println(res);
     
     // Tableau d'objets

@@ -58,9 +58,11 @@ bloc
 
 instruction
     : declaration
+    | affectation_composee           // +=, -=, &=, |=, etc.
     | affectation
+    | affectation_membre_tableau
     | affectation_membre
-    | affectation_tableau               // tab[i] = valeur
+    | affectation_tableau
     | method_call ';'
     | retour
     | appel_fonction ';'
@@ -75,6 +77,11 @@ instruction
     | ';'
     ;
 
+affectation_composee
+    : ID COMPOUND_ASSIGN expression ';'                    # SimpleCompoundAssign
+    | ID '[' expression ']' COMPOUND_ASSIGN expression ';' # ArrayCompoundAssign
+    ;
+
 affectation
     : ID '=' expression ';'
     ;
@@ -85,6 +92,10 @@ affectation_membre
 
 affectation_tableau
     : ID '[' expression ']' '=' expression ';'
+    ;
+
+affectation_membre_tableau
+    : objectRef '.' ID '[' expression ']' '=' expression ';'
     ;
 
 method_call
@@ -125,15 +136,14 @@ println_stmt
     ;
 
 input_stmt
-    : 'input' '(' input_type? ')' ';'   // input(int); ou input(string);
-    | 'input' '(' ')' ';'           // input(); (type par défaut: string)
+    : 'input' '(' input_type? ')' ';'
+    | 'input' '(' ')' ';'
     ;
 
 argument_list
     : expression (',' expression)*
     ;
 
-// Type pour input
 input_type
     : 'int'
     | 'double'
@@ -148,41 +158,67 @@ objectRef
     ;
 
 expression
-    : objectRef '.' ID '(' argument_list? ')'   # MethodCallExpr
-    | objectRef '.' ID                          # MemberAccessExpr
-    | 'input' '(' input_type? ')'                   # InputExpr
-    | ID '[' expression ']'                     # ArrayAccessExpr   // Accès tableau
-    | ID '(' argument_list? ')'                 # CallExpr
-    | '(' expression ')'                        # ParensExpr
-    | INT                                       # IntLiteral
-    | FLOAT                                     # FloatLiteral
-    | STRING                                    # StringLiteral
-    | BOOL                                      # BoolLiteral
-    | CHAR                                      # CharLiteral
-    | ID                                        # VarRef
-    | 'null'                                    # NullLiteral
-    | 'this'                                    # ThisExpr
-    | '&' ID                                    # RefOfExpr
-    | '*' expression                            # DerefExpr
-    | '!' expression                            # NotExpr
-    | '-' expression                            # UnaryMinusExpr
-    | '+' expression                            # UnaryPlusExpr
-    | expression '*' expression                 # MulExpr
-    | expression '/' expression                 # DivExpr
-    | expression '%' expression                 # ModExpr
-    | expression '+' expression                 # AddExpr
-    | expression '-' expression                 # SubExpr
-    | expression '<' expression                 # LessExpr
-    | expression '>' expression                 # GreaterExpr
-    | expression '<=' expression                # LessOrEqualExpr
-    | expression '>=' expression                # GreaterOrEqualExpr
-    | expression '==' expression                # EqualExpr
-    | expression '!=' expression                # NotEqualExpr
-    | expression '&&' expression                # AndExpr
-    | expression '||' expression                # OrExpr
-    | <assoc=right> expression '=' expression   # AssignExpr
-    | '[' expression (',' expression)* ']'      # ArrayLiteral      // Tableau littéral
+    : objectRef '.' ID '[' expression ']'                 # MemberArrayAccessExpr
+    | objectRef '.' ID '(' argument_list? ')'             # MethodCallExpr
+    | objectRef '.' ID                                    # MemberAccessExpr
+    | 'input' '(' input_type? ')'                         # InputExpr
+    | ID '[' expression ']'                               # ArrayAccessExpr
+    | ID '(' argument_list? ')'                           # CallExpr
+    | '(' expression ')'                                  # ParensExpr
+    | INT                                                 # IntLiteral
+    | FLOAT                                               # FloatLiteral
+    | STRING                                              # StringLiteral
+    | BOOL                                                # BoolLiteral
+    | CHAR                                                # CharLiteral
+    | ID                                                  # VarRef
+    | 'null'                                              # NullLiteral
+    | 'this'                                              # ThisExpr
+    | '&' ID                                              # RefOfExpr
+    | '*' expression                                      # DerefExpr
+    | '!' expression                                      # NotExpr
+    | '~' expression                                      # BitwiseNotExpr    // NOUVEAU
+    | '-' expression                                      # UnaryMinusExpr
+    | '+' expression                                      # UnaryPlusExpr
+    | <assoc=right> expression '=' expression             # AssignExpr
+    | expression COMPOUND_ASSIGN expression               # CompoundAssignExpr // NOUVEAU
+    | expression '*' expression                           # MulExpr
+    | expression '/' expression                           # DivExpr
+    | expression '%' expression                           # ModExpr
+    | expression '+' expression                           # AddExpr
+    | expression '-' expression                           # SubExpr
+    | expression '<<' expression                          # LeftShiftExpr     // NOUVEAU
+    | expression '>>' expression                          # RightShiftExpr    // NOUVEAU
+    | expression '<' expression                           # LessExpr
+    | expression '>' expression                           # GreaterExpr
+    | expression '<=' expression                          # LessOrEqualExpr
+    | expression '>=' expression                          # GreaterOrEqualExpr
+    | expression '==' expression                          # EqualExpr
+    | expression '!=' expression                          # NotEqualExpr
+    | expression '&' expression                           # BitwiseAndExpr    // NOUVEAU
+    | expression '^' expression                           # BitwiseXorExpr    // NOUVEAU
+    | expression '|' expression                           # BitwiseOrExpr     // NOUVEAU
+    | expression '&&' expression                          # AndExpr
+    | expression '||' expression                          # OrExpr
+    | '[' expression (',' expression)* ']'                # ArrayLiteral
     ;
+
+// ===== NOUVEAUX TOKENS =====
+
+// Opérateurs d'affectation composée (avec opérateurs binaires)
+COMPOUND_ASSIGN
+    : '+='
+    | '-='
+    | '*='
+    | '/='
+    | '%='
+    | '&='
+    | '|='
+    | '^='
+    | '<<='
+    | '>>='
+    ;
+
+// ===== MOTS-CLÉS =====
 
 CLASS       : 'class';
 CONSTRUCTOR : 'constructor';
