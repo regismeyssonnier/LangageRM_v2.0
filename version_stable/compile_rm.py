@@ -40,6 +40,7 @@ class CompilateurLLVM(RmLangVisitor):
         self.classe_courante = None
         self.objet_courant = None
         self.return_value = None
+        self.en_scan_classe = False
         
         # Compteurs
         self._str_count = 0
@@ -59,8 +60,13 @@ class CompilateurLLVM(RmLangVisitor):
         self._declare_malloc()
         self._declare_free()
         self._declare_chkstk()
+        self._declare_scanf()
+
 
         self.var_types = {}   # clean_nom -> nom de classe déclarée
+
+        self.arrays = {}  # clean_nom -> {'type': type, 'size': size, 'ptr': ptr}
+        self.array_types = {}  # clean_nom -> type element
     
     def _clean_name(self, name):
         if name is None:
@@ -92,6 +98,12 @@ class CompilateurLLVM(RmLangVisitor):
     def _declare_free(self):
         free_ty = ir.FunctionType(self.void, [self.void_ptr])
         self.free = ir.Function(self.module, free_ty, name="free")
+
+    def _declare_scanf(self):
+        """Déclare la fonction scanf de la librairie C"""
+        # int scanf(const char* format, ...)
+        scanf_ty = ir.FunctionType(self.i32, [self.string_type], var_arg=True)
+        self.scanf = ir.Function(self.module, scanf_ty, name="scanf")
     
     def _create_string(self, text):
         self._str_count += 1
@@ -112,6 +124,8 @@ class CompilateurLLVM(RmLangVisitor):
             return self.i32
         elif type_rm == 'string':
             return self.string_type
+        elif type_rm == 'char':
+            return self.i8  # i8 = 1 octet
         else:
             return self.void_ptr
     
@@ -190,9 +204,10 @@ class CompilateurLLVM(RmLangVisitor):
     def _get_struct_type(self, classe):
         if classe in self.struct_types:
             return self.struct_types[classe]
-        
+    
         membres = self.classes[classe]['membres']
-        types = [self.void_ptr]
+        # Le premier champ est le pointeur vtable
+        types = [self.void_ptr]  # vtable
         for m in membres:
             t = self._get_llvm_type(m['type'])
             types.append(t)
@@ -272,7 +287,7 @@ class CompilateurLLVM(RmLangVisitor):
         
             # NOUVEAU: Enregistrer le type si c'est un objet
             p_type = param_types[i]
-            if p_type not in ('int', 'double', 'float', 'string', 'bool', 'void'):
+            if p_type not in ('int', 'double', 'float', 'string', 'bool', 'char', 'void'):
                 self.var_types[clean_name] = p_type
     
         self.visit(info['corps'])
@@ -322,6 +337,14 @@ class CompilateurLLVM(RmLangVisitor):
                 self.builder.store(self.builder.bitcast(empty, self.string_type), field_ptr)
             elif m_type == 'bool':
                 self.builder.store(ir.Constant(self.i32, 0), field_ptr)
+            elif m_type == 'char':
+                # ============================================================
+                # GESTION DES CARACTÈRES (char)
+                # ============================================================
+                self.builder.store(ir.Constant(self.i8, 0), field_ptr)
+            else:
+                # Objet ou autre type
+                self.builder.store(ir.Constant(self.void_ptr, None), field_ptr)
     
         # NOUVEAU: Enregistrer la classe de l'objet dans var_types
         clean_ptr = "obj_" + str(id(ptr))
@@ -350,7 +373,7 @@ class CompilateurLLVM(RmLangVisitor):
                     self.builder.store(args[i], param_ptr)
                     self.variables[clean_name] = param_ptr
                     # Enregistrer le type du parametre
-                    if p_type not in ('int', 'double', 'float', 'string', 'bool', 'void'):
+                    if p_type not in ('int', 'double', 'float', 'string', 'bool', 'char', 'void'):
                         self.var_types[clean_name] = p_type
         
             self.visit(constructeur['corps'])
@@ -429,9 +452,24 @@ class CompilateurLLVM(RmLangVisitor):
     # ============================================================
     
     def visitProgram(self, ctx):
+        declarations_globales = []
+        autres = []
+
         for child in ctx.getChildren():
+            if isinstance(child, RmLangParser.DeclarationContext):
+                declarations_globales.append(child)
+            else:
+                autres.append(child)
+
+        # Visiter les globales EN PREMIER, pendant que builder est encore None
+        for decl in declarations_globales:
+            self.visit(decl)
+
+        # Puis les fonctions et classes
+        for child in autres:
             self.visit(child)
-        
+
+        # Créer la fonction main si elle n'existe pas
         if 'main' not in self.fonctions:
             main_type = ir.FunctionType(self.i32, [])
             main_func = ir.Function(self.module, main_type, name="main")
@@ -440,18 +478,40 @@ class CompilateurLLVM(RmLangVisitor):
             self.builder = ir.IRBuilder(entry_block)
             self.builder.ret(ir.Constant(self.i32, 0))
             self.builder = old_builder
-        
+
         return None
     
     # ============================================================
     # DECLARATIONS
     # ============================================================
     
+    def _get_original_text(self, ctx):
+        """Récupère le texte source EXACT (avec espaces) entre le début et la fin du contexte"""
+        start_index = ctx.start.start
+        stop_index = ctx.stop.stop
+        input_stream = ctx.start.getInputStream()
+        return input_stream.getText(start_index, stop_index)
+
     def visitDeclaration(self, ctx):
+        if ctx.REF():
+            type_var = ctx.type_().getText()
+            nom = ctx.ID(0).getText()        # "z"
+            ref_nom = ctx.ID(1).getText()    # "w"
+
+            clean_nom = self._clean_name(nom)
+            clean_ref = self._clean_name(ref_nom)
+
+            if clean_ref in self.variables:
+                # z devient un ALIAS : on stocke directement le pointeur de w
+                self.variables[clean_nom] = self.variables[clean_ref]
+            return None
+
         type_var = ctx.type_().getText()
         nom = ctx.ID(0).getText()
-        
-        if self.classe_courante is not None:
+
+        print(f"[DEBUG] visitDeclaration: type={type_var}, nom={nom}, builder={self.builder is not None}")
+
+        if self.en_scan_classe:
             if self.classe_courante not in self.classes:
                 self.classes[self.classe_courante] = {'membres': [], 'methodes': {}}
             self.classes[self.classe_courante]['membres'].append({
@@ -459,17 +519,212 @@ class CompilateurLLVM(RmLangVisitor):
                 'type': type_var
             })
             return None
-        
-        llvm_type = self._get_llvm_type(type_var)
+
         clean_nom = self._clean_name(nom)
+        texte = self._get_original_text(ctx)
+
+        # Détection tableau
+        import re
+        pattern = r'\b' + re.escape(nom) + r'\s*\['
+        est_tableau = bool(re.search(pattern, texte))
+
+        if est_tableau:
+            # Extraire la taille
+            match = re.search(r'\[([^\]]+)\]', texte)
+            taille_val = 5
+            if match:
+                try:
+                    taille_val = int(match.group(1))
+                except:
+                    taille_val = 5
+
+            # Extraire les valeurs
+            match_init = re.search(r'\{([^}]*)\}', texte)
+            valeurs_init = []
+
+            if match_init:
+                content = match_init.group(1).strip()
+                if content:
+                    parts = []
+                    current = ""
+                    in_string = False
+                    for c in content:
+                        if c == '"':
+                            in_string = not in_string
+                            current += c
+                        elif c == ',' and not in_string:
+                            parts.append(current.strip())
+                            current = ""
+                        else:
+                            current += c
+                    if current.strip():
+                        parts.append(current.strip())
+
+                    for v in parts:
+                        v = v.strip()
+                        if not v:
+                            continue
+
+                        if type_var == 'string':
+                            if v.startswith('"') and v.endswith('"'):
+                                str_var = self._create_string(v[1:-1])
+                                if self.builder:
+                                    valeurs_init.append(self.builder.bitcast(str_var, self.string_type))
+                                else:
+                                    zero = ir.Constant(self.i32, 0)
+                                    valeurs_init.append(str_var.gep([zero, zero]))
+                            else:
+                                empty = self._create_string("")
+                                if self.builder:
+                                    valeurs_init.append(self.builder.bitcast(empty, self.string_type))
+                                else:
+                                    zero = ir.Constant(self.i32, 0)
+                                    valeurs_init.append(empty.gep([zero, zero]))
+                        elif type_var == 'int':
+                            if v.isdigit():
+                                valeurs_init.append(ir.Constant(self.i32, int(v)))
+                            else:
+                                valeurs_init.append(ir.Constant(self.i32, 0))
+                        elif type_var == 'double':
+                            try:
+                                valeurs_init.append(ir.Constant(self.double, float(v)))
+                            except:
+                                valeurs_init.append(ir.Constant(self.double, 0.0))
+                        elif type_var == 'bool':
+                            valeurs_init.append(ir.Constant(self.i32, 1 if v == 'true' else 0))
+                        elif type_var == 'char':
+                            if v.startswith("'") and v.endswith("'"):
+                                char_val = ord(v[1:-1])
+                                valeurs_init.append(ir.Constant(self.i8, char_val))
+                            elif v.isdigit():
+                                valeurs_init.append(ir.Constant(self.i8, int(v)))
+                            else:
+                                valeurs_init.append(ir.Constant(self.i8, 0))
+                        else:
+                            valeurs_init.append(ir.Constant(self.void_ptr, None))
+
+            if valeurs_init:
+                taille_val = len(valeurs_init)
+
+            # Créer le tableau
+            elem_type = self._get_llvm_type(type_var)
+            array_type = ir.ArrayType(elem_type, taille_val)
+
+            if self.builder is None:
+                # Variable globale
+                global_array = ir.GlobalVariable(self.module, array_type, name=clean_nom)
+                init_values = []
+                for i in range(taille_val):
+                    if i < len(valeurs_init):
+                        init_values.append(valeurs_init[i])
+                    else:
+                        if type_var == 'int':
+                            init_values.append(ir.Constant(self.i32, 0))
+                        elif type_var == 'double':
+                            init_values.append(ir.Constant(self.double, 0.0))
+                        elif type_var == 'string':
+                            empty = self._create_string("")
+                            zero = ir.Constant(self.i32, 0)
+                            init_values.append(empty.gep([zero, zero]))
+                        elif type_var == 'char':
+                            init_values.append(ir.Constant(self.i8, 0))
+                        else:
+                            init_values.append(ir.Constant(self.void_ptr, None))
+                global_array.initializer = ir.Constant(array_type, init_values)
+                self.variables[clean_nom] = global_array
+                self.array_types[clean_nom] = type_var
+                return global_array
+
+            # Tableau local
+            ptr = self.builder.alloca(array_type, name=clean_nom)
+        
+            # Si c'est un tableau de char, on le stocke aussi comme string pour faciliter l'accès
+            if type_var == 'char':
+                # Créer un pointeur vers le tableau (decay en i8*)
+                char_ptr = self.builder.bitcast(ptr, self.string_type)
+                self.variables[clean_nom + "_ptr"] = char_ptr
+        
+            for i in range(taille_val):
+                elem_ptr = self.builder.gep(ptr, [ir.Constant(self.i32, 0), ir.Constant(self.i32, i)])
+                if i < len(valeurs_init):
+                    self.builder.store(valeurs_init[i], elem_ptr)
+                else:
+                    if type_var == 'int':
+                        self.builder.store(ir.Constant(self.i32, 0), elem_ptr)
+                    elif type_var == 'double':
+                        self.builder.store(ir.Constant(self.double, 0.0), elem_ptr)
+                    elif type_var == 'string':
+                        empty = self._create_string("")
+                        self.builder.store(self.builder.bitcast(empty, self.string_type), elem_ptr)
+                    elif type_var == 'char':
+                        self.builder.store(ir.Constant(self.i8, 0), elem_ptr)
+                    else:
+                        self.builder.store(ir.Constant(self.void_ptr, None), elem_ptr)
+
+            self.variables[clean_nom] = ptr
+            self.array_types[clean_nom] = type_var
+            return ptr
+
+        # ============================================================
+        # VARIABLE NORMALE
+        # ============================================================
+
+        if self.builder is None:
+            llvm_type = self._get_llvm_type(type_var)
+            global_var = ir.GlobalVariable(self.module, llvm_type, name=clean_nom)
+            if type_var == 'int':
+                global_var.initializer = ir.Constant(self.i32, 0)
+            elif type_var == 'double':
+                global_var.initializer = ir.Constant(self.double, 0.0)
+            elif type_var == 'bool':
+                global_var.initializer = ir.Constant(self.i32, 0)
+            elif type_var == 'string':
+                empty = self._create_string("")
+                global_var.initializer = empty
+            elif type_var == 'char':
+                global_var.initializer = ir.Constant(self.i8, 0)
+            else:
+                global_var.initializer = ir.Constant(self.void_ptr, None)
+            self.variables[clean_nom] = global_var
+            if type_var not in ('int', 'double', 'float', 'string', 'bool', 'void', 'char'):
+                self.var_types[clean_nom] = type_var
+            return global_var
+
+        llvm_type = self._get_llvm_type(type_var)
         ptr = self.builder.alloca(llvm_type, name=clean_nom)
         self.variables[clean_nom] = ptr
 
-        if type_var not in ('int', 'double', 'float', 'string', 'bool', 'void'):
-            self.var_types[clean_nom] = type_var   # NOUVEAU
-        
+        if type_var not in ('int', 'double', 'float', 'string', 'bool', 'void', 'char'):
+            self.var_types[clean_nom] = type_var
+
+        # Dans la partie VARIABLE NORMALE, remplacer le bloc de conversion :
+
         if ctx.expression():
             valeur = self.visit(ctx.expression())
+            print(f"[DEBUG] valeur={valeur}, type={type_var}")
+    
+            if type_var == 'string':
+                if isinstance(valeur, ir.Constant) and isinstance(valeur.type, ir.IntType):
+                    str_val = self._create_string(str(valeur.constant))
+                    valeur = self.builder.bitcast(str_val, self.string_type)
+                elif isinstance(valeur.type, ir.IntType):
+                    str_val = self._create_string("0")
+                    valeur = self.builder.bitcast(str_val, self.string_type)
+                elif isinstance(valeur.type, ir.PointerType) and isinstance(valeur.type.pointee, ir.ArrayType):
+                    # Pointeur vers tableau de char -> i8*
+                    zero = ir.Constant(self.i32, 0)
+                    valeur = self.builder.gep(valeur, [zero, zero])
+                elif isinstance(valeur.type, ir.ArrayType) and isinstance(valeur.type.element, ir.IntType) and valeur.type.element.width == 8:
+                    # Tableau de char direct -> i8*
+                    zero = ir.Constant(self.i32, 0)
+                    valeur = self.builder.gep(valeur, [zero, zero])
+            elif type_var == 'char':
+                if isinstance(valeur, ir.Constant) and isinstance(valeur.type, ir.IntType):
+                    if valeur.type.width == 32:
+                        valeur = self.builder.trunc(valeur, self.i8)
+                elif isinstance(valeur.type, ir.IntType) and valeur.type.width == 32:
+                    valeur = self.builder.trunc(valeur, self.i8)
+    
             self.builder.store(valeur, ptr)
         else:
             if type_var == 'int':
@@ -481,10 +736,130 @@ class CompilateurLLVM(RmLangVisitor):
             elif type_var == 'string':
                 empty = self._create_string("")
                 self.builder.store(self.builder.bitcast(empty, self.string_type), ptr)
+            elif type_var == 'char':
+                self.builder.store(ir.Constant(self.i8, 0), ptr)
             else:
                 self.builder.store(ir.Constant(self.void_ptr, None), ptr)
-        
+
         return ptr
+    
+    # ============================================================
+    # ARRAYS
+    # ============================================================
+    def visitArrayAccessExpr(self, ctx):
+        nom = ctx.ID().getText()
+        clean_nom = self._clean_name(nom)
+        index = self.visit(ctx.expression())
+    
+        if clean_nom in self.variables:
+            ptr = self.variables[clean_nom]
+        
+            # Si c'est un pointeur vers un tableau
+            if hasattr(ptr.type, 'pointee') and isinstance(ptr.type.pointee, ir.ArrayType):
+                # Tableau: tab[i]
+                elem_ptr = self.builder.gep(ptr, [ir.Constant(self.i32, 0), index])
+                return self.builder.load(elem_ptr)
+        
+            # Si c'est un pointeur vers i8 (chaîne)
+            elif hasattr(ptr.type, 'pointee') and isinstance(ptr.type.pointee, ir.IntType) and ptr.type.pointee.width == 8:
+                # Chaîne: str[i] - retourner le caractère
+                char_ptr = self.builder.gep(ptr, [index])
+                return self.builder.load(char_ptr)
+        
+            # Si c'est un double pointeur (i8**)
+            elif hasattr(ptr.type, 'pointee') and isinstance(ptr.type.pointee, ir.PointerType):
+                str_ptr = self.builder.load(ptr)
+                char_ptr = self.builder.gep(str_ptr, [index])
+                return self.builder.load(char_ptr)
+        
+            else:
+                return self.builder.load(ptr)
+    
+        return ir.Constant(self.i32, 0)
+
+    def visitAffectation_tableau(self, ctx):
+        nom = ctx.ID().getText()
+        clean_nom = self._clean_name(nom)
+        index = self.visit(ctx.expression(0))
+        valeur = self.visit(ctx.expression(1))
+
+        if clean_nom in self.variables:
+            ptr = self.variables[clean_nom]
+        
+            # Vérifier le type du pointeur
+            if isinstance(ptr.type, ir.PointerType):
+                pointee = ptr.type.pointee
+            
+                # Cas 1: Tableau (ArrayType)
+                if isinstance(pointee, ir.ArrayType):
+                    elem_ptr = self.builder.gep(ptr, [ir.Constant(self.i32, 0), index])
+                    # Si c'est un tableau de char, convertir la valeur
+                    if isinstance(pointee.element, ir.IntType) and pointee.element.width == 8:
+                        if isinstance(valeur.type, ir.IntType) and valeur.type.width == 32:
+                            valeur = self.builder.trunc(valeur, self.i8)
+                    self.builder.store(valeur, elem_ptr)
+            
+                # Cas 2: Pointeur vers i8 (chaîne)
+                elif isinstance(pointee, ir.IntType) and pointee.width == 8:
+                    char_ptr = self.builder.gep(ptr, [index])
+                    if isinstance(valeur.type, ir.IntType) and valeur.type.width == 32:
+                        valeur = self.builder.trunc(valeur, self.i8)
+                    self.builder.store(valeur, char_ptr)
+            
+                # Cas 3: Double pointeur (i8**)
+                elif isinstance(pointee, ir.PointerType):
+                    str_ptr = self.builder.load(ptr)
+                    char_ptr = self.builder.gep(str_ptr, [index])
+                    if isinstance(valeur.type, ir.IntType) and valeur.type.width == 32:
+                        valeur = self.builder.trunc(valeur, self.i8)
+                    self.builder.store(valeur, char_ptr)
+                else:
+                    # Cas général
+                    elem_ptr = self.builder.gep(ptr, [index])
+                    self.builder.store(valeur, elem_ptr)
+
+        return valeur
+
+    def visitArrayLiteral(self, ctx):
+        """Visite un ArrayLiteral: {1, 2, 3}"""
+        valeurs = []
+    
+        # Parcourir tous les enfants pour trouver les expressions
+        for child in ctx.getChildren():
+            # Vérifier si l'enfant est une expression
+            if hasattr(child, 'expression'):
+                # Si c'est une expression, la visiter
+                try:
+                    val = self.visit(child)
+                    if val is not None:
+                        valeurs.append(val)
+                except:
+                    pass
+            # Vérifier si l'enfant est un IntLiteral, FloatLiteral, etc.
+            elif hasattr(child, 'getText'):
+                try:
+                    # Essayer de visiter l'enfant directement
+                    val = self.visit(child)
+                    if val is not None:
+                        valeurs.append(val)
+                except:
+                    pass
+    
+        # Si on a trouvé des valeurs, les utiliser
+        if valeurs:
+            elem_type = valeurs[0].type
+            array_type = ir.ArrayType(elem_type, len(valeurs))
+            const_array = ir.Constant(array_type, valeurs)
+        
+            self._str_count += 1
+            name = "array_lit_" + str(self._str_count)
+            var = ir.GlobalVariable(self.module, array_type, name=name)
+            var.initializer = const_array
+            var.global_constant = True
+        
+            return self.builder.bitcast(var, self.void_ptr)
+    
+        return ir.Constant(self.void_ptr, None)
     
     # ============================================================
     # FONCTIONS
@@ -537,7 +912,7 @@ class CompilateurLLVM(RmLangVisitor):
                 self.variables[clean_pname] = ptr
             
                 # NOUVEAU: Enregistrer le type si c'est un objet
-                if p_type not in ('int', 'double', 'float', 'string', 'bool', 'void'):
+                if p_type not in ('char', 'int', 'double', 'float', 'string', 'bool', 'void'):
                     self.var_types[clean_pname] = p_type
     
         self.visit(ctx.bloc())
@@ -569,13 +944,15 @@ class CompilateurLLVM(RmLangVisitor):
     def visitClasse(self, ctx):
         nom = ctx.ID().getText()
         self.classe_courante = nom
-        
+        self.en_scan_classe = True
+
         if nom not in self.classes:
             self.classes[nom] = {'membres': [], 'methodes': {}}
         
         for membre in ctx.class_member():
             self.visit(membre)
         
+        self.en_scan_classe = False
         self.classe_courante = None
         return None
     
@@ -626,7 +1003,7 @@ class CompilateurLLVM(RmLangVisitor):
             }
         
         return None
-    
+           
     def _resoudre_classe(self, nom):
         if nom == 'this':
             return self.classe_courante
@@ -666,12 +1043,21 @@ class CompilateurLLVM(RmLangVisitor):
                 break
     
     def visitAffectation(self, ctx):
+        """Affectation d'une variable"""
         nom = ctx.ID().getText()
         clean_nom = self._clean_name(nom)
         valeur = self.visit(ctx.expression())
         ptr = self.variables.get(clean_nom)
+    
         if ptr:
+            # Si c'est une chaîne (i8*) et la valeur est un entier, convertir
+            if isinstance(ptr.type, ir.PointerType) and isinstance(ptr.type.pointee, ir.IntType) and ptr.type.pointee.width == 8:
+                if isinstance(valeur.type, ir.IntType):
+                    # Convertir l'entier en chaîne
+                    str_val = self._create_string(str(valeur.constant))
+                    valeur = self.builder.bitcast(str_val, self.string_type)
             self.builder.store(valeur, ptr)
+    
         return valeur
     
     def visitAffectation_membre(self, ctx):
@@ -834,13 +1220,44 @@ class CompilateurLLVM(RmLangVisitor):
     def visitBoolLiteral(self, ctx):
         value = 1 if ctx.getText() == 'true' else 0
         return ir.Constant(self.i32, value)
+
+
+    def visitCharLiteral(self, ctx):
+        text = ctx.getText()[1:-1]  # retire les quotes
+        if text.startswith('\\'):
+            # gérer les échappements courants
+            mapping = {'n': '\n', 't': '\t', '\\': '\\', "'": "'", '0': '\0'}
+            char = mapping.get(text[1], text[1])
+        else:
+            char = text
+        return ir.Constant(self.i8, ord(char))
     
     def visitVarRef(self, ctx):
         nom = ctx.ID().getText()
         clean_nom = self._clean_name(nom)
         ptr = self.variables.get(clean_nom)
+    
         if ptr:
-            return self.builder.load(ptr)
+            # Si c'est un tableau de char, retourner un pointeur vers le premier élément
+            if isinstance(ptr.type.pointee, ir.ArrayType):
+                # Vérifier si c'est un tableau de char
+                if isinstance(ptr.type.pointee.element, ir.IntType) and ptr.type.pointee.element.width == 8:
+                    # Retourner un pointeur vers le premier élément (i8*)
+                    zero = ir.Constant(self.i32, 0)
+                    return self.builder.gep(ptr, [zero, zero])
+                else:
+                    # Autre tableau, retourner le pointeur
+                    return ptr
+            # Si c'est un pointeur vers un tableau, charger le pointeur
+            elif isinstance(ptr.type, ir.PointerType) and isinstance(ptr.type.pointee, ir.ArrayType):
+                return ptr
+            # Si c'est un double pointeur (i8**), charger le pointeur
+            elif isinstance(ptr.type, ir.PointerType) and isinstance(ptr.type.pointee, ir.PointerType):
+                return self.builder.load(ptr)
+            # Sinon, charger la valeur
+            else:
+                return self.builder.load(ptr)
+    
         return ir.Constant(self.i32, 0)
     
     def visitAddExpr(self, ctx):
@@ -936,12 +1353,9 @@ class CompilateurLLVM(RmLangVisitor):
         if obj_ptr is None:
             return ir.Constant(self.i32, 0)
         
-        classe = self.classe_courante
+        classe = self._resoudre_classe(obj_nom)     # CORRIGÉ : utilise le vrai type déclaré
         if classe is None:
-            if self.classes:
-                classe = list(self.classes.keys())[0]
-            else:
-                return ir.Constant(self.i32, 0)
+            return ir.Constant(self.i32, 0)
         
         old_classe = self.classe_courante
         self.classe_courante = classe
@@ -989,46 +1403,176 @@ class CompilateurLLVM(RmLangVisitor):
     
     def visitArgument_list(self, ctx):
         return [self.visit(expr) for expr in ctx.expression()]
+
+    def visitInputExpr(self, ctx):
+        """input(type) comme expression"""
+        type_attendu = 'string'  # Par défaut
+    
+        # Vérifier si input_type existe
+        if ctx.input_type():
+            type_attendu = ctx.input_type().getText()
+    
+        print(f"[DEBUG] input: {type_attendu}")
+    
+        if type_attendu == 'int':
+            ptr = self.builder.alloca(self.i32, name="input_int")
+            fmt = self._create_string("%d")
+            fmt_ptr = self.builder.bitcast(fmt, self.string_type)
+            self.builder.call(self.scanf, [fmt_ptr, ptr])
+            return self.builder.load(ptr)
+    
+        elif type_attendu == 'double':
+            ptr = self.builder.alloca(self.double, name="input_double")
+            fmt = self._create_string("%lf")
+            fmt_ptr = self.builder.bitcast(fmt, self.string_type)
+            self.builder.call(self.scanf, [fmt_ptr, ptr])
+            return self.builder.load(ptr)
+    
+        elif type_attendu == 'float':
+            ptr = self.builder.alloca(self.double, name="input_float")
+            fmt = self._create_string("%f")
+            fmt_ptr = self.builder.bitcast(fmt, self.string_type)
+            self.builder.call(self.scanf, [fmt_ptr, ptr])
+            return self.builder.load(ptr)
+    
+        elif type_attendu == 'bool':
+            ptr = self.builder.alloca(self.i32, name="input_bool")
+            fmt = self._create_string("%d")
+            fmt_ptr = self.builder.bitcast(fmt, self.string_type)
+            self.builder.call(self.scanf, [fmt_ptr, ptr])
+            valeur = self.builder.load(ptr)
+            # Convertir en booléen (0 ou 1)
+            zero = ir.Constant(self.i32, 0)
+            cmp = self.builder.icmp_signed('!=', valeur, zero)
+            return self.builder.zext(cmp, self.i32)
+    
+        else:  # string
+            # Allouer un buffer de 256 caractères
+            buffer_type = ir.ArrayType(self.i8, 256)
+            buffer_ptr = self.builder.alloca(buffer_type, name="input_string")
+            buffer_cast = self.builder.bitcast(buffer_ptr, self.string_type)
+        
+            fmt = self._create_string("%255s")  # Limiter à 255 caractères
+            fmt_ptr = self.builder.bitcast(fmt, self.string_type)
+            self.builder.call(self.scanf, [fmt_ptr, buffer_cast])
+        
+            return buffer_cast
     
     # ============================================================
     # PRINT
     # ============================================================
-    
-    def visitPrint_stmt(self, ctx):
-        valeur = self.visit(ctx.expression())
-        
-        if isinstance(valeur.type, ir.IntType) and valeur.type.width == 32:
-            fmt = self._create_string("%d")
-            fmt_ptr = self.builder.bitcast(fmt, self.string_type)
-            self.builder.call(self.printf, [fmt_ptr, valeur])
-        elif isinstance(valeur.type, ir.DoubleType):
-            fmt = self._create_string("%f")
-            fmt_ptr = self.builder.bitcast(fmt, self.string_type)
-            self.builder.call(self.printf, [fmt_ptr, valeur])
-        elif isinstance(valeur.type, ir.PointerType):
-            self.builder.call(self.printf, [valeur])
-        else:
-            self.builder.call(self.printf, [valeur])
-        
-        return None
-    
     def visitPrintln_stmt(self, ctx):
         valeur = self.visit(ctx.expression())
-        
-        if isinstance(valeur.type, ir.IntType) and valeur.type.width == 32:
-            fmt = self._create_string("%d\n")
-            fmt_ptr = self.builder.bitcast(fmt, self.string_type)
-            self.builder.call(self.printf, [fmt_ptr, valeur])
+    
+        if isinstance(valeur.type, ir.IntType):
+            if valeur.type.width == 8:
+                char_val = self.builder.zext(valeur, self.i32)
+                fmt = self._create_string("%c\n")
+                fmt_ptr = self.builder.bitcast(fmt, self.string_type)
+                self.builder.call(self.printf, [fmt_ptr, char_val])
+            else:
+                fmt = self._create_string("%d\n")
+                fmt_ptr = self.builder.bitcast(fmt, self.string_type)
+                self.builder.call(self.printf, [fmt_ptr, valeur])
         elif isinstance(valeur.type, ir.DoubleType):
             fmt = self._create_string("%f\n")
             fmt_ptr = self.builder.bitcast(fmt, self.string_type)
             self.builder.call(self.printf, [fmt_ptr, valeur])
         elif isinstance(valeur.type, ir.PointerType):
-            self.builder.call(self.puts, [valeur])
+            if isinstance(valeur.type.pointee, ir.IntType) and valeur.type.pointee.width == 8:
+                # Utiliser printf avec %s au lieu de puts
+                fmt = self._create_string("%s\n")
+                fmt_ptr = self.builder.bitcast(fmt, self.string_type)
+                self.builder.call(self.printf, [fmt_ptr, valeur])
+            else:
+                fmt = self._create_string("%p\n")
+                fmt_ptr = self.builder.bitcast(fmt, self.string_type)
+                addr = self.builder.bitcast(valeur, self.void_ptr)
+                self.builder.call(self.printf, [fmt_ptr, addr])
         else:
             self.builder.call(self.puts, [valeur])
-        
+    
         return None
+
+    def visitPrint_stmt(self, ctx):
+        valeur = self.visit(ctx.expression())
+    
+        if isinstance(valeur.type, ir.IntType):
+            if valeur.type.width == 8:
+                char_val = self.builder.zext(valeur, self.i32)
+                fmt = self._create_string("%c")
+                fmt_ptr = self.builder.bitcast(fmt, self.string_type)
+                self.builder.call(self.printf, [fmt_ptr, char_val])
+            else:
+                fmt = self._create_string("%d")
+                fmt_ptr = self.builder.bitcast(fmt, self.string_type)
+                self.builder.call(self.printf, [fmt_ptr, valeur])
+        elif isinstance(valeur.type, ir.DoubleType):
+            fmt = self._create_string("%f")
+            fmt_ptr = self.builder.bitcast(fmt, self.string_type)
+            self.builder.call(self.printf, [fmt_ptr, valeur])
+        elif isinstance(valeur.type, ir.PointerType):
+            if isinstance(valeur.type.pointee, ir.IntType) and valeur.type.pointee.width == 8:
+                fmt = self._create_string("%s")
+                fmt_ptr = self.builder.bitcast(fmt, self.string_type)
+                self.builder.call(self.printf, [fmt_ptr, valeur])
+            else:
+                fmt = self._create_string("%p")
+                fmt_ptr = self.builder.bitcast(fmt, self.string_type)
+                addr = self.builder.bitcast(valeur, self.void_ptr)
+                self.builder.call(self.printf, [fmt_ptr, addr])
+        else:
+            self.builder.call(self.puts, [valeur])
+    
+        return None
+
+    def visitInput_stmt(self, ctx):
+        """Instruction input: lit une valeur depuis l'utilisateur"""
+    
+        # Déterminer le type attendu
+        type_attendu = 'string'  # Par défaut
+        if ctx.type():
+            type_attendu = ctx.type().getText()
+    
+        # Créer une variable pour stocker la valeur lue
+        llvm_type = self._get_llvm_type(type_attendu)
+        ptr = self.builder.alloca(llvm_type, name="input_var")
+    
+        # Créer le format string pour scanf
+        if type_attendu == 'int':
+            fmt = self._create_string("%d")
+            fmt_ptr = self.builder.bitcast(fmt, self.string_type)
+            self.builder.call(self.scanf, [fmt_ptr, ptr])
+        elif type_attendu == 'double':
+            fmt = self._create_string("%lf")
+            fmt_ptr = self.builder.bitcast(fmt, self.string_type)
+            self.builder.call(self.scanf, [fmt_ptr, ptr])
+        elif type_attendu == 'string':
+            # Pour les chaînes, on utilise un buffer
+            # Allouer un buffer de 256 caractères
+            buffer_type = ir.ArrayType(self.i8, 256)
+            buffer_ptr = self.builder.alloca(buffer_type, name="input_buffer")
+            buffer_cast = self.builder.bitcast(buffer_ptr, self.string_type)
+        
+            # Format pour chaîne: %s
+            fmt = self._create_string("%s")
+            fmt_ptr = self.builder.bitcast(fmt, self.string_type)
+            self.builder.call(self.scanf, [fmt_ptr, buffer_cast])
+        
+            # Retourner le pointeur vers le buffer
+            return buffer_cast
+        else:
+            # Par défaut: string
+            buffer_type = ir.ArrayType(self.i8, 256)
+            buffer_ptr = self.builder.alloca(buffer_type, name="input_buffer")
+            buffer_cast = self.builder.bitcast(buffer_ptr, self.string_type)
+            fmt = self._create_string("%s")
+            fmt_ptr = self.builder.bitcast(fmt, self.string_type)
+            self.builder.call(self.scanf, [fmt_ptr, buffer_cast])
+            return buffer_cast
+    
+        # Charger la valeur lue
+        return self.builder.load(ptr)
 
 # ============================================================
 # COMPILATION

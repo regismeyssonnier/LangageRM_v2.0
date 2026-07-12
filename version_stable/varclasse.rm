@@ -1,0 +1,26 @@
+class Personne {
+    string nom;
+    int age;
+    
+    constructor Personne(string nom, int age) {
+        this.nom = nom;
+        this.age = age;
+    }
+    
+    func void Afficher() {
+        print("Nom: ");
+        println(this.nom);
+        print("Age: ");
+        println(this.age);
+    }
+}
+
+func void Test(Personne p) {
+    p.Afficher();
+}
+
+func int main() {
+    Personne p = Personne("Alice", 25);
+    Test(p);
+    return 0;
+}

@@ -11,10 +11,15 @@ program
 declaration
     : type ID ('=' expression)? ';'
     | 'ref' type ID '=' '&' ID ';'
+    | type ID '[' expression ']' ('=' array_init)? ';'   // Tableau
+    ;
+
+array_init
+    : '{' expression (',' expression)* '}'   // Initialisation de tableau
     ;
 
 type
-    : 'int' | 'double' | 'float' | 'string' | 'bool' | 'void' | ID
+    : 'char' | 'int' | 'double' | 'float' | 'string' | 'bool' | 'void' | ID
     ;
 
 fonction
@@ -55,9 +60,11 @@ instruction
     : declaration
     | affectation
     | affectation_membre
+    | affectation_tableau               // tab[i] = valeur
     | method_call ';'
     | retour
     | appel_fonction ';'
+    | input_stmt 
     | condition
     | boucle_while
     | boucle_for
@@ -74,6 +81,10 @@ affectation
 
 affectation_membre
     : objectRef '.' ID '=' expression ';'
+    ;
+
+affectation_tableau
+    : ID '[' expression ']' '=' expression ';'
     ;
 
 method_call
@@ -96,8 +107,6 @@ boucle_while
     : 'while' '(' expression ')' bloc
     ;
 
-// ===== CORRECTION ICI =====
-// for (initialisation; condition; increment)
 boucle_for
     : 'for' '(' for_init? ';' expression? ';' expression? ')' bloc
     ;
@@ -115,8 +124,22 @@ println_stmt
     : 'println' '(' expression ')'
     ;
 
+input_stmt
+    : 'input' '(' input_type? ')' ';'   // input(int); ou input(string);
+    | 'input' '(' ')' ';'           // input(); (type par défaut: string)
+    ;
+
 argument_list
     : expression (',' expression)*
+    ;
+
+// Type pour input
+input_type
+    : 'int'
+    | 'double'
+    | 'float'
+    | 'string'
+    | 'bool'
     ;
 
 objectRef
@@ -127,12 +150,15 @@ objectRef
 expression
     : objectRef '.' ID '(' argument_list? ')'   # MethodCallExpr
     | objectRef '.' ID                          # MemberAccessExpr
+    | 'input' '(' input_type? ')'                   # InputExpr
+    | ID '[' expression ']'                     # ArrayAccessExpr   // Accès tableau
     | ID '(' argument_list? ')'                 # CallExpr
     | '(' expression ')'                        # ParensExpr
     | INT                                       # IntLiteral
     | FLOAT                                     # FloatLiteral
     | STRING                                    # StringLiteral
     | BOOL                                      # BoolLiteral
+    | CHAR                                      # CharLiteral
     | ID                                        # VarRef
     | 'null'                                    # NullLiteral
     | 'this'                                    # ThisExpr
@@ -155,6 +181,7 @@ expression
     | expression '&&' expression                # AndExpr
     | expression '||' expression                # OrExpr
     | <assoc=right> expression '=' expression   # AssignExpr
+    | '[' expression (',' expression)* ']'      # ArrayLiteral      // Tableau littéral
     ;
 
 CLASS       : 'class';
@@ -169,10 +196,12 @@ BREAK       : 'break';
 CONTINUE    : 'continue';
 PRINT       : 'print';
 PRINTLN     : 'println';
+INPUT       : 'input';
 REF         : 'ref';
 THIS        : 'this';
 NULL        : 'null';
 
+CHAR_TYPE   : 'char';
 INT_TYPE    : 'int';
 DOUBLE_TYPE : 'double';
 FLOAT_TYPE  : 'float';
@@ -188,6 +217,8 @@ ID
     : [a-zA-Z_][a-zA-Z0-9_]*
     ;
 
+CHAR : '\'' ( ~['\\] | '\\' . ) '\'' ;
+
 INT
     : [0-9]+
     ;
@@ -199,8 +230,6 @@ FLOAT
 STRING
     : '"' (~["\r\n])* '"'
     ;
-
-
 
 COMMENT_SINGLE
     : '//' ~[\r\n]* -> skip

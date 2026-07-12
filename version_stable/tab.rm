@@ -1,0 +1,186 @@
+class Personne {
+    string nom;
+    int age;
+    
+    constructor Personne(string nom, int age) {
+        this.nom = nom;
+        this.age = age;
+    }
+    
+    func void Afficher() {
+        print("Nom: ");
+        println(this.nom);
+        print("Age: ");
+        println(this.age);
+    }
+    
+    func string GetNom() {
+        return this.nom;
+    }
+}
+
+class ChaineManage {
+    string var_chaine;
+
+    constructor ChaineManage(string s) {
+        this.var_chaine = s;
+    }
+
+
+    func int Len() {
+        
+        int ln = 0;
+        string vs = this.var_chaine;
+        while (vs[ln]) {
+            ln = ln + 1;
+        }
+        return ln;
+       
+    }
+
+    func string Concat(ChaineManage s) {
+       
+        return this.var_chaine;
+    }
+
+
+}
+
+// 5. Char dans une classe
+class Test {
+    char c;
+
+    constructor Test(char c) {
+        this.c = c;
+    }
+
+    func char GetChar() {
+        return this.c;
+    }
+}
+
+
+func int main() {
+    // Tableau d'entiers
+    int tab[5] = {1, 2, 3, 4, 5};
+
+    char c = 'A';
+    println(c);
+
+    // 2. Buffer et chaîne
+    char buffer[6] = { 'L','o','u','i','s',0 };
+    string nomb = buffer;
+    print("nomb=");
+    println(nomb);
+
+    // 3. Modification du buffer
+    buffer[1] = 'X';
+    print("nomb2=");
+    println(nomb);
+
+    Test t = Test('Z');
+    print("t.c = ");
+    println(t.c);
+    print("t.GetChar() = ");
+    println(t.GetChar());
+    
+    // Tableau de chaînes
+    string noms[3] = {"Alice", "Bob", "Charlie"};
+    noms[0] = "trouduc";
+    string nom = "Louis";
+    int index = 0;
+    println(nom[index]);
+    while (nom[index]) {
+        println(nom[index]);
+        index = index + 1;
+    }
+    print("index=");
+    println(index);
+
+    string lr = "Laurent";
+    ChaineManage strtest = ChaineManage("Laurent       ");
+    print("length=");
+    int ln = strtest.Len();
+    println(ln); 
+    ChaineManage strtestc = ChaineManage("Yes");
+    string res = strtest.Concat(strtestc);
+    println(res);
+    
+    // Tableau d'objets
+    Personne personnes[2];
+    
+    // Accès et modification
+    tab[0] = 10;
+    int x = tab[1];
+    
+    println(tab[0]);
+    tab[1] = 100;
+    println(x);
+
+    // Boucle sur tableau
+    int i = 0;
+    while (i < 5) {
+        println(tab[i]);
+        i = i + 1;
+    }
+
+    for(int j = 0; j < 3; j = j + 1) {
+        println(noms[j]);
+    }
+
+    string chaine = "Regis";
+    print("acces chaine=");
+    println(chaine[0]);
+
+    int w;
+    w = 10;
+    ref int z = &w;
+    z=z+20;
+    
+    print("z=");
+    println(z);
+
+    print("w=");
+    println(w);
+
+
+    // CORRECTION ICI : Utiliser une variable temporaire
+    for(int k = 0; k < 2; k = k + 1) {
+        Personne p = Personne(noms[k], k * 10);
+        personnes[k] = p;
+        Personne x = personnes[k];
+        x.Afficher();
+        x.age = x.age + 5;
+        Personne y = x;
+        y.Afficher();
+        Personne w = personnes[k];
+        w.Afficher();
+        print("-----------------");
+
+    }
+    
+    // Lecture d'un entier
+    println("Entrez un nombre: ");
+    int x = input(int);
+    print("Vous avez saisi: ");
+    println(x);
+
+    // Lecture d'une chaîne
+    println("Entrez votre nom: ");
+    string nom = input(string);
+    print("Bonjour ");
+    println(nom);
+
+    // Lecture de plusieurs valeurs
+    println("Entrez age et taille: ");
+    int age = input(int);
+    double taille = input(double);
+
+    print("Age: ");
+    println(age);
+    print("Taille: ");
+    println(taille);
+
+
+    return 0;
+}
