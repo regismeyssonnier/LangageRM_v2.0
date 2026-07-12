@@ -13,3 +13,11 @@
 It uses ANTLR for parser File and LLVM to create the code, and finally clang or gcc to create the .exe file
 
 You have to install LLVM for windows and llvmlite for python.
+
+## How to understand with AI?
+
+First, copy/paste in Deepseek (Fast Mode), the code you want to understand, and when Deepseek didn't resolve many times try Claude (Medium Mode). Deepseek didn't resolve the problem sometimes.
+
+Use more Deepseek because it's unlimited and full power beast. https://chat.deepseek.com/
+
+Claude is token limited and you can't use all the day like Deepseek. https://claude.ai
