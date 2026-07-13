@@ -74,6 +74,11 @@ class RmLangVisitor(ParseTreeVisitor):
         return self.visitChildren(ctx)
 
 
+    # Visit a parse tree produced by RmLangParser#affectation.
+    def visitAffectation(self, ctx:RmLangParser.AffectationContext):
+        return self.visitChildren(ctx)
+
+
     # Visit a parse tree produced by RmLangParser#SimpleCompoundAssign.
     def visitSimpleCompoundAssign(self, ctx:RmLangParser.SimpleCompoundAssignContext):
         return self.visitChildren(ctx)
@@ -81,11 +86,6 @@ class RmLangVisitor(ParseTreeVisitor):
 
     # Visit a parse tree produced by RmLangParser#ArrayCompoundAssign.
     def visitArrayCompoundAssign(self, ctx:RmLangParser.ArrayCompoundAssignContext):
-        return self.visitChildren(ctx)
-
-
-    # Visit a parse tree produced by RmLangParser#affectation.
-    def visitAffectation(self, ctx:RmLangParser.AffectationContext):
         return self.visitChildren(ctx)
 
 
@@ -101,6 +101,41 @@ class RmLangVisitor(ParseTreeVisitor):
 
     # Visit a parse tree produced by RmLangParser#affectation_membre_tableau.
     def visitAffectation_membre_tableau(self, ctx:RmLangParser.Affectation_membre_tableauContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by RmLangParser#file_mode.
+    def visitFile_mode(self, ctx:RmLangParser.File_modeContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by RmLangParser#file_open_stmt.
+    def visitFile_open_stmt(self, ctx:RmLangParser.File_open_stmtContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by RmLangParser#file_close_stmt.
+    def visitFile_close_stmt(self, ctx:RmLangParser.File_close_stmtContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by RmLangParser#file_read_stmt.
+    def visitFile_read_stmt(self, ctx:RmLangParser.File_read_stmtContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by RmLangParser#file_write_stmt.
+    def visitFile_write_stmt(self, ctx:RmLangParser.File_write_stmtContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by RmLangParser#file_read_binary_stmt.
+    def visitFile_read_binary_stmt(self, ctx:RmLangParser.File_read_binary_stmtContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by RmLangParser#file_write_binary_stmt.
+    def visitFile_write_binary_stmt(self, ctx:RmLangParser.File_write_binary_stmtContext):
         return self.visitChildren(ctx)
 
 
@@ -174,13 +209,8 @@ class RmLangVisitor(ParseTreeVisitor):
         return self.visitChildren(ctx)
 
 
-    # Visit a parse tree produced by RmLangParser#VarRef.
-    def visitVarRef(self, ctx:RmLangParser.VarRefContext):
-        return self.visitChildren(ctx)
-
-
-    # Visit a parse tree produced by RmLangParser#MulExpr.
-    def visitMulExpr(self, ctx:RmLangParser.MulExprContext):
+    # Visit a parse tree produced by RmLangParser#FileOpenExpr.
+    def visitFileOpenExpr(self, ctx:RmLangParser.FileOpenExprContext):
         return self.visitChildren(ctx)
 
 
@@ -194,28 +224,13 @@ class RmLangVisitor(ParseTreeVisitor):
         return self.visitChildren(ctx)
 
 
-    # Visit a parse tree produced by RmLangParser#BitwiseOrExpr.
-    def visitBitwiseOrExpr(self, ctx:RmLangParser.BitwiseOrExprContext):
-        return self.visitChildren(ctx)
-
-
-    # Visit a parse tree produced by RmLangParser#DerefExpr.
-    def visitDerefExpr(self, ctx:RmLangParser.DerefExprContext):
-        return self.visitChildren(ctx)
-
-
-    # Visit a parse tree produced by RmLangParser#AssignExpr.
-    def visitAssignExpr(self, ctx:RmLangParser.AssignExprContext):
+    # Visit a parse tree produced by RmLangParser#FileWriteExpr.
+    def visitFileWriteExpr(self, ctx:RmLangParser.FileWriteExprContext):
         return self.visitChildren(ctx)
 
 
     # Visit a parse tree produced by RmLangParser#LessOrEqualExpr.
     def visitLessOrEqualExpr(self, ctx:RmLangParser.LessOrEqualExprContext):
-        return self.visitChildren(ctx)
-
-
-    # Visit a parse tree produced by RmLangParser#BoolLiteral.
-    def visitBoolLiteral(self, ctx:RmLangParser.BoolLiteralContext):
         return self.visitChildren(ctx)
 
 
@@ -239,13 +254,13 @@ class RmLangVisitor(ParseTreeVisitor):
         return self.visitChildren(ctx)
 
 
-    # Visit a parse tree produced by RmLangParser#NotExpr.
-    def visitNotExpr(self, ctx:RmLangParser.NotExprContext):
+    # Visit a parse tree produced by RmLangParser#FileReadExpr.
+    def visitFileReadExpr(self, ctx:RmLangParser.FileReadExprContext):
         return self.visitChildren(ctx)
 
 
-    # Visit a parse tree produced by RmLangParser#ThisExpr.
-    def visitThisExpr(self, ctx:RmLangParser.ThisExprContext):
+    # Visit a parse tree produced by RmLangParser#FileCloseExpr.
+    def visitFileCloseExpr(self, ctx:RmLangParser.FileCloseExprContext):
         return self.visitChildren(ctx)
 
 
@@ -259,43 +274,13 @@ class RmLangVisitor(ParseTreeVisitor):
         return self.visitChildren(ctx)
 
 
-    # Visit a parse tree produced by RmLangParser#ArrayAccessExpr.
-    def visitArrayAccessExpr(self, ctx:RmLangParser.ArrayAccessExprContext):
-        return self.visitChildren(ctx)
-
-
     # Visit a parse tree produced by RmLangParser#FloatLiteral.
     def visitFloatLiteral(self, ctx:RmLangParser.FloatLiteralContext):
         return self.visitChildren(ctx)
 
 
-    # Visit a parse tree produced by RmLangParser#SubExpr.
-    def visitSubExpr(self, ctx:RmLangParser.SubExprContext):
-        return self.visitChildren(ctx)
-
-
-    # Visit a parse tree produced by RmLangParser#RightShiftExpr.
-    def visitRightShiftExpr(self, ctx:RmLangParser.RightShiftExprContext):
-        return self.visitChildren(ctx)
-
-
-    # Visit a parse tree produced by RmLangParser#GreaterExpr.
-    def visitGreaterExpr(self, ctx:RmLangParser.GreaterExprContext):
-        return self.visitChildren(ctx)
-
-
     # Visit a parse tree produced by RmLangParser#AddExpr.
     def visitAddExpr(self, ctx:RmLangParser.AddExprContext):
-        return self.visitChildren(ctx)
-
-
-    # Visit a parse tree produced by RmLangParser#GreaterOrEqualExpr.
-    def visitGreaterOrEqualExpr(self, ctx:RmLangParser.GreaterOrEqualExprContext):
-        return self.visitChildren(ctx)
-
-
-    # Visit a parse tree produced by RmLangParser#NotEqualExpr.
-    def visitNotEqualExpr(self, ctx:RmLangParser.NotEqualExprContext):
         return self.visitChildren(ctx)
 
 
@@ -314,11 +299,6 @@ class RmLangVisitor(ParseTreeVisitor):
         return self.visitChildren(ctx)
 
 
-    # Visit a parse tree produced by RmLangParser#DivExpr.
-    def visitDivExpr(self, ctx:RmLangParser.DivExprContext):
-        return self.visitChildren(ctx)
-
-
     # Visit a parse tree produced by RmLangParser#StringLiteral.
     def visitStringLiteral(self, ctx:RmLangParser.StringLiteralContext):
         return self.visitChildren(ctx)
@@ -334,6 +314,116 @@ class RmLangVisitor(ParseTreeVisitor):
         return self.visitChildren(ctx)
 
 
+    # Visit a parse tree produced by RmLangParser#ModExpr.
+    def visitModExpr(self, ctx:RmLangParser.ModExprContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by RmLangParser#NullLiteral.
+    def visitNullLiteral(self, ctx:RmLangParser.NullLiteralContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by RmLangParser#LeftShiftExpr.
+    def visitLeftShiftExpr(self, ctx:RmLangParser.LeftShiftExprContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by RmLangParser#CompoundAssignExpr.
+    def visitCompoundAssignExpr(self, ctx:RmLangParser.CompoundAssignExprContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by RmLangParser#VarRef.
+    def visitVarRef(self, ctx:RmLangParser.VarRefContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by RmLangParser#MulExpr.
+    def visitMulExpr(self, ctx:RmLangParser.MulExprContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by RmLangParser#FileEofExpr.
+    def visitFileEofExpr(self, ctx:RmLangParser.FileEofExprContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by RmLangParser#FileReadBinExpr.
+    def visitFileReadBinExpr(self, ctx:RmLangParser.FileReadBinExprContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by RmLangParser#BitwiseOrExpr.
+    def visitBitwiseOrExpr(self, ctx:RmLangParser.BitwiseOrExprContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by RmLangParser#DerefExpr.
+    def visitDerefExpr(self, ctx:RmLangParser.DerefExprContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by RmLangParser#AssignExpr.
+    def visitAssignExpr(self, ctx:RmLangParser.AssignExprContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by RmLangParser#BoolLiteral.
+    def visitBoolLiteral(self, ctx:RmLangParser.BoolLiteralContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by RmLangParser#NotExpr.
+    def visitNotExpr(self, ctx:RmLangParser.NotExprContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by RmLangParser#ThisExpr.
+    def visitThisExpr(self, ctx:RmLangParser.ThisExprContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by RmLangParser#ArrayAccessExpr.
+    def visitArrayAccessExpr(self, ctx:RmLangParser.ArrayAccessExprContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by RmLangParser#SubExpr.
+    def visitSubExpr(self, ctx:RmLangParser.SubExprContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by RmLangParser#RightShiftExpr.
+    def visitRightShiftExpr(self, ctx:RmLangParser.RightShiftExprContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by RmLangParser#GreaterExpr.
+    def visitGreaterExpr(self, ctx:RmLangParser.GreaterExprContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by RmLangParser#GreaterOrEqualExpr.
+    def visitGreaterOrEqualExpr(self, ctx:RmLangParser.GreaterOrEqualExprContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by RmLangParser#NotEqualExpr.
+    def visitNotEqualExpr(self, ctx:RmLangParser.NotEqualExprContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by RmLangParser#DivExpr.
+    def visitDivExpr(self, ctx:RmLangParser.DivExprContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by RmLangParser#FileWriteBinExpr.
+    def visitFileWriteBinExpr(self, ctx:RmLangParser.FileWriteBinExprContext):
+        return self.visitChildren(ctx)
+
+
     # Visit a parse tree produced by RmLangParser#UnaryPlusExpr.
     def visitUnaryPlusExpr(self, ctx:RmLangParser.UnaryPlusExprContext):
         return self.visitChildren(ctx)
@@ -344,11 +434,6 @@ class RmLangVisitor(ParseTreeVisitor):
         return self.visitChildren(ctx)
 
 
-    # Visit a parse tree produced by RmLangParser#ModExpr.
-    def visitModExpr(self, ctx:RmLangParser.ModExprContext):
-        return self.visitChildren(ctx)
-
-
     # Visit a parse tree produced by RmLangParser#MemberAccessExpr.
     def visitMemberAccessExpr(self, ctx:RmLangParser.MemberAccessExprContext):
         return self.visitChildren(ctx)
@@ -356,21 +441,6 @@ class RmLangVisitor(ParseTreeVisitor):
 
     # Visit a parse tree produced by RmLangParser#BitwiseXorExpr.
     def visitBitwiseXorExpr(self, ctx:RmLangParser.BitwiseXorExprContext):
-        return self.visitChildren(ctx)
-
-
-    # Visit a parse tree produced by RmLangParser#NullLiteral.
-    def visitNullLiteral(self, ctx:RmLangParser.NullLiteralContext):
-        return self.visitChildren(ctx)
-
-
-    # Visit a parse tree produced by RmLangParser#CompoundAssignExpr.
-    def visitCompoundAssignExpr(self, ctx:RmLangParser.CompoundAssignExprContext):
-        return self.visitChildren(ctx)
-
-
-    # Visit a parse tree produced by RmLangParser#LeftShiftExpr.
-    def visitLeftShiftExpr(self, ctx:RmLangParser.LeftShiftExprContext):
         return self.visitChildren(ctx)
 
 

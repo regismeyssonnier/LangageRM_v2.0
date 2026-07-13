@@ -1,0 +1,17 @@
+func int main() {
+    int x = 7;
+    
+    if (x > 20) {
+        println("x > 20");
+    } else if (x > 15) {
+        println("x > 15");
+    } else if (x > 10) {
+        println("x > 10");
+    } else if (x > 5) {
+        println("x > 5");
+    } else {
+        println("x <= 5");
+    }
+    
+    return 0;
+}

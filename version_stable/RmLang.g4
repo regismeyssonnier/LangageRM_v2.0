@@ -11,11 +11,11 @@ program
 declaration
     : type ID ('=' expression)? ';'
     | 'ref' type ID '=' '&' ID ';'
-    | type ID '[' expression ']' ('=' array_init)? ';'   // Tableau
+    | type ID '[' expression ']' ('=' array_init)? ';'
     ;
 
 array_init
-    : '{' expression (',' expression)* '}'   // Initialisation de tableau
+    : '{' expression (',' expression)* '}'
     ;
 
 type
@@ -58,7 +58,7 @@ bloc
 
 instruction
     : declaration
-    | affectation_composee           // +=, -=, &=, |=, etc.
+    | affectation_composee          // DOIT être avant affectation
     | affectation
     | affectation_membre_tableau
     | affectation_membre
@@ -74,16 +74,27 @@ instruction
     | 'continue' ';'
     | print_stmt ';'
     | println_stmt ';'
+    // Fichiers (instructions)
+    | file_open_stmt ';'
+    | file_close_stmt ';'
+    | file_read_stmt ';'
+    | file_write_stmt ';'
+    | file_read_binary_stmt ';'
+    | file_write_binary_stmt ';'
     | ';'
+    ;
+
+// ============================================================
+// AFFECTATIONS
+// ============================================================
+
+affectation
+    : ID '=' expression ';'
     ;
 
 affectation_composee
     : ID COMPOUND_ASSIGN expression ';'                    # SimpleCompoundAssign
     | ID '[' expression ']' COMPOUND_ASSIGN expression ';' # ArrayCompoundAssign
-    ;
-
-affectation
-    : ID '=' expression ';'
     ;
 
 affectation_membre
@@ -97,6 +108,47 @@ affectation_tableau
 affectation_membre_tableau
     : objectRef '.' ID '[' expression ']' '=' expression ';'
     ;
+
+// ============================================================
+// FICHIERS
+// ============================================================
+
+file_mode
+    : 'READ'
+    | 'WRITE'
+    | 'APPEND'
+    | 'READ_BIN'
+    | 'WRITE_BIN'
+    ;
+
+// Instructions (se terminent par ;)
+file_open_stmt
+    : 'file_open' '(' expression ',' file_mode ')'
+    ;
+
+file_close_stmt
+    : 'file_close' '(' expression ')'
+    ;
+
+file_read_stmt
+    : 'file_read' '(' expression ',' ID ')'
+    ;
+
+file_write_stmt
+    : 'file_write' '(' expression ',' expression ')'
+    ;
+
+file_read_binary_stmt
+    : 'file_read_bin' '(' expression ',' type ',' ID ')'
+    ;
+
+file_write_binary_stmt
+    : 'file_write_bin' '(' expression ',' expression ')'
+    ;
+
+// ============================================================
+// DIVERS
+// ============================================================
 
 method_call
     : objectRef '.' ID '(' argument_list? ')'
@@ -157,6 +209,10 @@ objectRef
     | 'this'
     ;
 
+// ============================================================
+// EXPRESSION - TOUT LABELLISÉ
+// ============================================================
+
 expression
     : objectRef '.' ID '[' expression ']'                 # MemberArrayAccessExpr
     | objectRef '.' ID '(' argument_list? ')'             # MethodCallExpr
@@ -170,56 +226,52 @@ expression
     | STRING                                              # StringLiteral
     | BOOL                                                # BoolLiteral
     | CHAR                                                # CharLiteral
+    | '[' expression (',' expression)* ']'                # ArrayLiteral
     | ID                                                  # VarRef
     | 'null'                                              # NullLiteral
     | 'this'                                              # ThisExpr
     | '&' ID                                              # RefOfExpr
     | '*' expression                                      # DerefExpr
     | '!' expression                                      # NotExpr
-    | '~' expression                                      # BitwiseNotExpr    // NOUVEAU
+    | '~' expression                                      # BitwiseNotExpr
     | '-' expression                                      # UnaryMinusExpr
     | '+' expression                                      # UnaryPlusExpr
-    | <assoc=right> expression '=' expression             # AssignExpr
-    | expression COMPOUND_ASSIGN expression               # CompoundAssignExpr // NOUVEAU
+    //FICHIERS
+    | 'file_open' '(' expression ',' file_mode ')'         # FileOpenExpr       // int h = file_open("f.txt", READ)
+    | 'file_close' '(' expression ')'                      # FileCloseExpr      // int r = file_close(h)
+    | 'file_read' '(' expression ')'                       # FileReadExpr       // string s = file_read(h)
+    | 'file_read_bin' '(' expression ',' type ')'          # FileReadBinExpr    // int x = file_read_bin(h, int)
+    | 'file_write' '(' expression ',' expression ')'       # FileWriteExpr      // int r = file_write(h, "Hello")
+    | 'file_write_bin' '(' expression ',' expression ')'   # FileWriteBinExpr   // int r = file_write_bin(h, val)
+    | 'file_eof' '(' expression ')'                        # FileEofExpr
+    // Opérateurs binaires
     | expression '*' expression                           # MulExpr
     | expression '/' expression                           # DivExpr
     | expression '%' expression                           # ModExpr
     | expression '+' expression                           # AddExpr
     | expression '-' expression                           # SubExpr
-    | expression '<<' expression                          # LeftShiftExpr     // NOUVEAU
-    | expression '>>' expression                          # RightShiftExpr    // NOUVEAU
+    | expression '<<' expression                          # LeftShiftExpr
+    | expression '>>' expression                          # RightShiftExpr
     | expression '<' expression                           # LessExpr
     | expression '>' expression                           # GreaterExpr
     | expression '<=' expression                          # LessOrEqualExpr
     | expression '>=' expression                          # GreaterOrEqualExpr
     | expression '==' expression                          # EqualExpr
     | expression '!=' expression                          # NotEqualExpr
-    | expression '&' expression                           # BitwiseAndExpr    // NOUVEAU
-    | expression '^' expression                           # BitwiseXorExpr    // NOUVEAU
-    | expression '|' expression                           # BitwiseOrExpr     // NOUVEAU
+    | expression '&' expression                           # BitwiseAndExpr
+    | expression '^' expression                           # BitwiseXorExpr
+    | expression '|' expression                           # BitwiseOrExpr
     | expression '&&' expression                          # AndExpr
     | expression '||' expression                          # OrExpr
-    | '[' expression (',' expression)* ']'                # ArrayLiteral
+    | <assoc=right> expression '=' expression             # AssignExpr
+    | expression COMPOUND_ASSIGN expression               # CompoundAssignExpr
     ;
 
-// ===== NOUVEAUX TOKENS =====
+// ============================================================
+// TOKENS
+// ============================================================
 
-// Opérateurs d'affectation composée (avec opérateurs binaires)
-COMPOUND_ASSIGN
-    : '+='
-    | '-='
-    | '*='
-    | '/='
-    | '%='
-    | '&='
-    | '|='
-    | '^='
-    | '<<='
-    | '>>='
-    ;
-
-// ===== MOTS-CLÉS =====
-
+// Mots-clés du langage
 CLASS       : 'class';
 CONSTRUCTOR : 'constructor';
 FUNC        : 'func';
@@ -237,6 +289,7 @@ REF         : 'ref';
 THIS        : 'this';
 NULL        : 'null';
 
+// Types
 CHAR_TYPE   : 'char';
 INT_TYPE    : 'int';
 DOUBLE_TYPE : 'double';
@@ -244,6 +297,34 @@ FLOAT_TYPE  : 'float';
 STRING_TYPE : 'string';
 BOOL_TYPE   : 'bool';
 VOID_TYPE   : 'void';
+
+// Fichiers
+FILE_OPEN      : 'file_open';
+FILE_CLOSE     : 'file_close';
+FILE_READ      : 'file_read';
+FILE_WRITE     : 'file_write';
+FILE_READ_BIN  : 'file_read_bin';
+FILE_WRITE_BIN : 'file_write_bin';
+FILE_EOF       : 'file_eof';
+READ           : 'READ';
+WRITE          : 'WRITE';
+APPEND         : 'APPEND';
+READ_BIN       : 'READ_BIN';
+WRITE_BIN      : 'WRITE_BIN';
+
+// Opérateurs composés
+COMPOUND_ASSIGN
+    : '+='
+    | '-='
+    | '*='
+    | '/='
+    | '%='
+    | '&='
+    | '|='
+    | '^='
+    | '<<='
+    | '>>='
+    ;
 
 BOOL
     : 'true' | 'false'

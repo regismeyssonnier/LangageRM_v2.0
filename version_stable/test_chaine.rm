@@ -1,0 +1,46 @@
+class chaine {
+	string nom = "Regis";
+	string nom2 = "Regis";
+
+
+	constructor chaine() {
+		this.nom = "Wegis";
+		this.nom2 = "Regis";
+
+	}
+
+	func void Test() {
+
+		//do that if it's a string object member (Dereferencing)
+		string n = this.nom;
+
+		if (n[0] == 'R') {
+			println("Yes");
+		}
+		else {
+			println("No");
+		}
+		
+	}
+
+}
+
+
+func int main() {
+
+	string nom = "Regis";
+	string nom2 = "Regis";
+
+	if (nom[0] == 'R') {
+		println("Yes");
+	}
+	else {
+		println("No");
+	}
+
+	chaine ch = chaine();
+	ch.Test();
+
+
+	return 0;
+}

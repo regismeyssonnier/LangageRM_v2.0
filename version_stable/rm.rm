@@ -1,0 +1,24 @@
+variable=
+int
+double 
+float
+
+ref variable = &variable
+
+Fonction = 
+func type(ou rien) Afficher(int a){
+
+	return 
+
+}
+
+
+structure = 
+class Name{
+	constructor Name(int a, ...){
+	}
+
+	func Dsiplay(double a){
+	}
+
+}

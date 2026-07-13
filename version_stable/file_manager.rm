@@ -1,0 +1,109 @@
+// file_manager.rm
+class FileManager {
+    string filename;
+    int mode;
+    string handle;        // NOUVEAU : stocke le FILE* (comme int)
+
+    constructor FileManager(string fname, int fmode) {
+        this.filename = fname;
+        this.mode = fmode;
+        this.handle = "";  // Initialiser a 0
+    }
+
+    func bool open() {
+        println("open() - mode = ");
+        println(this.mode);    // Affiche quoi ?
+        // Ouvrir le fichier et stocker le handle
+        if (this.mode == 0) {
+            this.handle = file_open(this.filename, READ);
+            println("Handle apres open READ: ");
+            println(this.handle);
+            return true;
+        }
+        else if (this.mode == 1) {
+            this.handle = file_open(this.filename, WRITE);
+            return true;
+        }
+        else if (this.mode == 2) {
+            this.handle = file_open(this.filename, APPEND);
+            return true;
+        }
+        return false;
+    }
+
+    func void close() {
+        file_close(this.handle);    // Utiliser le handle
+    }
+
+    func void writeLine(string text) {
+        file_write(this.handle, text);     // Utiliser le handle
+        file_write(this.handle, "\n");     // Utiliser le handle
+    }
+
+    func string readLine() {
+        /*println("readLine - handle: ");
+        println(this.handle);
+        println("readLine - filename: ");
+        println(this.filename);
+        println("readLine - mode: ");
+        println(this.mode);*/
+
+        return file_read(this.handle);    // Utiliser le handle
+    }
+
+    func bool isEOF() {
+        return file_eof(this.handle);
+    }
+}
+
+func int main() {
+    // Test ecriture
+    string h = file_open("test_simple.txt", WRITE);
+    println("Handle ecriture: ");
+    println(h);
+       
+    file_write(h, "Test\n");
+    file_close(h);
+
+    // Verifier si le fichier existe
+    // (ouvrir en lecture)
+    string h2 = file_open("test_simple.txt", READ);
+    println("Handle lecture: ");
+    println(h2);
+        
+
+    string line = file_read(h2);
+    println("Ligne lue: ");
+    println(line);
+
+    file_close(h2);
+
+  
+    FileManager fm = FileManager("data.txt", 1);
+    bool o = fm.open();
+    if (o == true) {
+        println("true");
+    }
+    fm.writeLine("Nom: Alice");
+    fm.writeLine("Age: 25");
+    fm.writeLine("Ville: Paris");
+    
+    fm.close();
+    
+    // Lecture
+    FileManager reader = FileManager("data.txt", 0);
+    o = reader.open();
+    if (o == true) {
+        println("true");
+    }
+
+    while (reader.isEOF() == 0) {
+        string line = reader.readLine();
+        println(line);
+             
+    }
+    
+    reader.close();
+    
+    return 0;
+}

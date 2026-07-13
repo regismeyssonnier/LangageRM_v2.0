@@ -1,0 +1,209 @@
+func int main() {
+    println("=== TEST FICHIERS BINAIRES ===");
+    
+    // ========================================
+    // TEST 1 : Écriture d'entiers
+    // ========================================
+    println("Test 1: Ecriture d'entiers...");
+    
+    string h = file_open("test_int.bin", WRITE_BIN);
+    println("Handle: ");
+    println(h);
+    
+    file_write_bin(h, 42);
+    file_write_bin(h, 123);
+    file_write_bin(h, 999);
+    file_close(h);
+    
+    println("3 entiers ecrits.");
+    
+    // Lecture des entiers
+    h = file_open("test_int.bin", READ_BIN);
+    println("Handle lecture: ");
+    println(h);
+    
+    int a = file_read_bin(h, int);
+    int b = file_read_bin(h, int);
+    int c = file_read_bin(h, int);
+    
+    println("Entiers lus:");
+    print(a); print(" ");
+    print(b); print(" ");
+    println(c);
+    
+    file_close(h);
+    
+    // Vérification
+    if (a == 42 && b == 123 && c == 999) {
+        println("Test 1: OK !");
+    }
+    else {
+        println("Test 1: ECHEC !");
+    }
+    
+    // ========================================
+    // TEST 2 : Écriture de doubles
+    // ========================================
+    println("Test 2: Ecriture de doubles...");
+    
+    h = file_open("test_double.bin", WRITE_BIN);
+    
+    file_write_bin(h, 3.14);
+    file_write_bin(h, 2.71);
+    file_write_bin(h, 1.618);
+    file_close(h);
+    
+    println("3 doubles ecrits.");
+    
+    // Lecture
+    h = file_open("test_double.bin", READ_BIN);
+    
+    double d1 = file_read_bin(h, double);
+    double d2 = file_read_bin(h, double);
+    double d3 = file_read_bin(h, double);
+    
+    println("Doubles lus:");
+    print(d1); print(" ");
+    print(d2); print(" ");
+    println(d3);
+    
+    file_close(h);
+    
+    // ========================================
+    // TEST 3 : Écriture de caractères
+    // ========================================
+    println("Test 3: Ecriture de caracteres...");
+    
+    h = file_open("test_char.bin", WRITE_BIN);
+    
+    file_write_bin(h, 'A');
+    file_write_bin(h, 'B');
+    file_write_bin(h, 'C');
+    file_close(h);
+    
+    println("3 caracteres ecrits.");
+    
+    // Lecture
+    h = file_open("test_char.bin", READ_BIN);
+    
+    char ca = file_read_bin(h, char);
+    char cb = file_read_bin(h, char);
+    char cc = file_read_bin(h, char);
+    
+    println("Caracteres lus:");
+    print(ca); print(" ");
+    print(cb); print(" ");
+    println(cc);
+    
+    file_close(h);
+    
+    // ========================================
+    // TEST 4 : Mix int + double + char
+    // ========================================
+    println("Test 4: Mix int, double, char...");
+    
+    h = file_open("test_mix.bin", WRITE_BIN);
+    
+    file_write_bin(h, 42);       // int
+    file_write_bin(h, 3.14);     // double
+    file_write_bin(h, 'X');      // char
+    file_write_bin(h, 100);      // int
+    file_write_bin(h, 2.5);      // double
+    file_close(h);
+    
+    // Lecture dans le même ordre
+    h = file_open("test_mix.bin", READ_BIN);
+    
+    int v1 = file_read_bin(h, int);
+    double v2 = file_read_bin(h, double);
+    char v3 = file_read_bin(h, char);
+    int v4 = file_read_bin(h, int);
+    double v5 = file_read_bin(h, double);
+    
+    println("Valeurs lues:");
+    print(v1); print(" ");    // 42
+    print(v2); print(" ");    // 3.14
+    print(v3); print(" ");    // X
+    print(v4); print(" ");    // 100
+    println(v5);               // 2.5
+    
+    file_close(h);
+    
+    if (v1 == 42 && v4 == 100 && v3 == 'X') {
+        println("Test 4: OK !");
+    }
+    else {
+        println("Test 4: ECHEC !");
+    }
+    
+    // ========================================
+    // TEST 5 : Tableau d'entiers
+    // ========================================
+    println("Test 5: Tableau d'entiers...");
+    
+    h = file_open("test_array.bin", WRITE_BIN);
+    
+    int i = 0;
+    while (i < 5) {
+        file_write_bin(h, i * 10);
+        i = i + 1;
+    }
+    file_close(h);
+    
+    println("Tableau ecrit: 0, 10, 20, 30, 40");
+    
+    // Lecture
+    h = file_open("test_array.bin", READ_BIN);
+    
+    println("Tableau lu:");
+    i = 0;
+    while (i < 5) {
+        int val = file_read_bin(h, int);
+        print(val);
+        print(" ");
+        i = i + 1;
+    }
+    println("");
+    
+    file_close(h);
+    
+    // ========================================
+    // TEST 6 : Sauvegarde/Lecture structure Player
+    // ========================================
+    println("Test 6: Sauvegarde structure Player...");
+    
+    // Écrire les champs un par un
+    h = file_open("player.bin", WRITE_BIN);
+    
+    file_write_bin(h, 42);              // level
+    file_write_bin(h, 75.5);            // health
+    file_write_bin(h, 99999);           // score
+    file_close(h);
+    
+    println("Player sauvegarde: level=42, health=75.5, score=99999");
+    
+    // Lire
+    h = file_open("player.bin", READ_BIN);
+    
+    int level = file_read_bin(h, int);
+    double health = file_read_bin(h, double);
+    int score = file_read_bin(h, int);
+    
+    println("Player charge:");
+    print("level="); print(level); println("");
+    print("health="); print(health); println("");
+    print("score="); print(score); println("");
+    
+    file_close(h);
+    
+    if (level == 42 && score == 99999) {
+        println("Test 6: OK !");
+    }
+    else {
+        println("Test 6: ECHEC !");
+    }
+    
+    println("=== FIN DES TESTS ===");
+    
+    return 0;
+}

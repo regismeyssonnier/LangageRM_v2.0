@@ -68,6 +68,68 @@ class CompilateurLLVM(RmLangVisitor):
 
         self.arrays = {}  # clean_nom -> {'type': type, 'size': size, 'ptr': ptr}
         self.array_types = {}  # clean_nom -> type element
+
+        # FILE* fopen(const char* filename, const char* mode)
+        fopen_ty = ir.FunctionType(self.void_ptr, [self.string_type, self.string_type])
+        self.fopen = ir.Function(self.module, fopen_ty, name="fopen")
+    
+        # int fclose(FILE* stream)
+        fclose_ty = ir.FunctionType(self.i32, [self.void_ptr])
+        self.fclose = ir.Function(self.module, fclose_ty, name="fclose")
+    
+        # char* fgets(char* buffer, int size, FILE* stream)
+        fgets_ty = ir.FunctionType(self.string_type, [self.string_type, self.i32, self.void_ptr])
+        self.fgets = ir.Function(self.module, fgets_ty, name="fgets")
+    
+        # int fprintf(FILE* stream, const char* format, ...)
+        fprintf_ty = ir.FunctionType(self.i32, [self.void_ptr, self.string_type], var_arg=True)
+        self.fprintf = ir.Function(self.module, fprintf_ty, name="fprintf")
+    
+        # int fscanf(FILE* stream, const char* format, ...)
+        fscanf_ty = ir.FunctionType(self.i32, [self.void_ptr, self.string_type], var_arg=True)
+        self.fscanf = ir.Function(self.module, fscanf_ty, name="fscanf")
+    
+        # Supprimer un fichier : int remove(const char* filename)
+        remove_ty = ir.FunctionType(self.i32, [self.string_type])
+        self.remove_func = ir.Function(self.module, remove_ty, name="remove")
+    
+        # Renommer un fichier : int rename(const char* old, const char* new)
+        rename_ty = ir.FunctionType(self.i32, [self.string_type, self.string_type])
+        self.rename_func = ir.Function(self.module, rename_ty, name="rename")
+    
+        # Gestion des fichiers ouverts
+        self.file_handles = {}  # nom_variable -> pointeur FILE*
+
+        # size_t fread(void* ptr, size_t size, size_t count, FILE* stream)
+        fread_ty = ir.FunctionType(self.i32, [self.void_ptr, self.i32, self.i32, self.void_ptr])
+        self.fread = ir.Function(self.module, fread_ty, name="fread")
+    
+        # size_t fwrite(const void* ptr, size_t size, size_t count, FILE* stream)
+        fwrite_ty = ir.FunctionType(self.i32, [self.void_ptr, self.i32, self.i32, self.void_ptr])
+        self.fwrite = ir.Function(self.module, fwrite_ty, name="fwrite")
+    
+        # int fseek(FILE* stream, long offset, int whence)
+        # SEEK_SET = 0, SEEK_CUR = 1, SEEK_END = 2
+        fseek_ty = ir.FunctionType(self.i32, [self.void_ptr, self.i32, self.i32])
+        self.fseek = ir.Function(self.module, fseek_ty, name="fseek")
+    
+        # long ftell(FILE* stream)
+        ftell_ty = ir.FunctionType(self.i32, [self.void_ptr])
+        self.ftell = ir.Function(self.module, ftell_ty, name="ftell")
+    
+        # void rewind(FILE* stream)
+        rewind_ty = ir.FunctionType(self.void, [self.void_ptr])
+        self.rewind = ir.Function(self.module, rewind_ty, name="rewind")
+    
+        # int feof(FILE* stream)
+        feof_ty = ir.FunctionType(self.i32, [self.void_ptr])
+        self.feof = ir.Function(self.module, feof_ty, name="feof")
+
+        # Ajouter fputs
+        fputs_ty = ir.FunctionType(self.i32, [self.string_type, self.void_ptr])
+        self.fputs = ir.Function(self.module, fputs_ty, name="fputs")
+
+        self.file_read_buffer = None
     
     def _clean_name(self, name):
         if name is None:
@@ -109,6 +171,14 @@ class CompilateurLLVM(RmLangVisitor):
     def _create_string(self, text):
         self._str_count += 1
         name = "str_" + str(self._str_count)
+    
+        # Gérer les échappements
+        text = text.replace('\\n', '\n')
+        text = text.replace('\\t', '\t')
+        text = text.replace('\\r', '\r')
+        text = text.replace('\\\\', '\\')
+        text = text.replace('\\"', '"')
+    
         bytes_text = bytearray(text.encode('utf-8') + b'\x00')
         const_array = ir.Constant(ir.ArrayType(self.i8, len(bytes_text)), bytes_text)
         var = ir.GlobalVariable(self.module, const_array.type, name=name)
@@ -172,11 +242,15 @@ class CompilateurLLVM(RmLangVisitor):
         return self.class_ids[classe]
     
     def _get_method_index(self, classe, methode):
+        if classe in self.method_indices and methode in self.method_indices[classe]:
+            return self.method_indices[classe][methode]
+        # Ne devrait plus jamais arriver, mais on garde un filet de sécurité
+        print(f"[WARN] _get_method_index: {classe}.{methode} non pré-indexée, index arbitraire")
         if classe not in self.method_indices:
             self.method_indices[classe] = {}
-        if methode not in self.method_indices[classe]:
-            self.method_indices[classe][methode] = len(self.method_indices[classe])
-        return self.method_indices[classe][methode]
+        idx = len(self.method_indices[classe])
+        self.method_indices[classe][methode] = idx
+        return idx
     
     def _get_vtable_type(self, classe):
         if classe in self.vtable_types:
@@ -443,28 +517,98 @@ class CompilateurLLVM(RmLangVisitor):
         return self.builder.load(field_ptr)
     
     def _call_method(self, obj_ptr, methode, args):
+        """
+        [CORRIGÉ - VERSION FINALE]
+        """
+        # 1. Vérifications
+        if obj_ptr is None:
+            print("[ERREUR] _call_method: obj_ptr est None")
+            return ir.Constant(self.i32, 0)
+
         classe = self.classe_courante
-        if classe is None:
+        if classe is None or classe not in self.classes:
+            print(f"[ERREUR] _call_method: classe invalide '{classe}'")
             return ir.Constant(self.i32, 0)
-        
+
+        if methode not in self.classes[classe]['methodes']:
+            print(f"[ERREUR] Méthode '{methode}' non trouvée")
+            return ir.Constant(self.i32, 0)
+
+        # 2. Infos de la méthode
+        info_methode = self.classes[classe]['methodes'][methode]
+        nb_params_attendus = len(info_methode.get('params', []))
+        param_types = info_methode.get('param_types', [])
+
+        print(f"[DEBUG] _call_method: {classe}.{methode}() - attendu={nb_params_attendus}, fourni={len(args)}")
+
+        # 3. Ajuster les arguments utilisateur (sans this)
+        args_ajustes = []
+        for i in range(nb_params_attendus):
+            if i < len(args):
+                args_ajustes.append(args[i])
+            else:
+                # Valeur par défaut selon le type
+                if i < len(param_types):
+                    p_type = param_types[i]
+                    if p_type == 'int':
+                        args_ajustes.append(ir.Constant(self.i32, 0))
+                    elif p_type in ('double', 'float'):
+                        args_ajustes.append(ir.Constant(self.double, 0.0))
+                    elif p_type == 'bool':
+                        args_ajustes.append(ir.Constant(self.i32, 0))
+                    elif p_type == 'char':
+                        args_ajustes.append(ir.Constant(self.i8, 0))
+                    elif p_type == 'string':
+                        empty = self._create_string("")
+                        args_ajustes.append(self.builder.bitcast(empty, self.string_type))
+                    else:
+                        args_ajustes.append(ir.Constant(self.void_ptr, None))
+                else:
+                    args_ajustes.append(ir.Constant(self.i32, 0))
+
+        # 4. Récupérer le struct type et la vtable
         struct_type = self._get_struct_type(classe)
-        if struct_type is None:
-            return ir.Constant(self.i32, 0)
-        
         obj_struct = self.builder.bitcast(obj_ptr, struct_type.as_pointer())
-        vtable_ptr_ptr = self.builder.gep(obj_struct, [ir.Constant(self.i32, 0), ir.Constant(self.i32, 0)])
+    
+        vtable_ptr_ptr = self.builder.gep(
+            obj_struct, 
+            [ir.Constant(self.i32, 0), ir.Constant(self.i32, 0)]
+        )
         vtable_ptr = self.builder.load(vtable_ptr_ptr)
-        
+
+        # 5. Récupérer le pointeur de fonction
         method_index = self._get_method_index(classe, methode)
         vtable_index = method_index + 1
-        
+
         vtable_type = self._get_vtable_type(classe)
         vtable_struct = self.builder.bitcast(vtable_ptr, vtable_type.as_pointer())
-        func_ptr_ptr = self.builder.gep(vtable_struct, [ir.Constant(self.i32, 0), ir.Constant(self.i32, vtable_index)])
+        func_ptr_ptr = self.builder.gep(
+            vtable_struct,
+            [ir.Constant(self.i32, 0), ir.Constant(self.i32, vtable_index)]
+        )
         func_ptr = self.builder.load(func_ptr_ptr)
-        
-        call_args = [obj_ptr] + args
-        return self.builder.call(func_ptr, call_args)
+
+        # 6. CORRECTION : call_args = [obj_ptr] + args_ajustes
+        call_args = [obj_ptr] + args_ajustes
+    
+        nb_total = 1 + nb_params_attendus
+    
+        print(f"[DEBUG] _call_method: call_args={len(call_args)} (attendu={nb_total})")
+        print(f"[DEBUG]   Types: {[str(a.type) for a in call_args]}")
+
+        # 7. Vérification finale
+        if len(call_args) != nb_total:
+            print(f"[ERREUR FATALE] Nombre d'arguments incorrect: {len(call_args)} vs {nb_total}")
+            print(f"   => Troncature à {nb_total}")
+            call_args = call_args[:nb_total]
+
+        # 8. Appel
+        try:
+            result = self.builder.call(func_ptr, call_args)
+            return result
+        except Exception as e:
+            print(f"[ERREUR] Exception dans l'appel: {e}")
+            return ir.Constant(self.i32, 0)
 
     # ============================================================
     # 
@@ -1344,13 +1488,43 @@ class CompilateurLLVM(RmLangVisitor):
         return func
     
     def visitRetour(self, ctx):
-        if ctx.expression():
-            valeur = self.visit(ctx.expression())
-            if isinstance(valeur.type, ir.PointerType) and isinstance(valeur.type.pointee, ir.ArrayType):
-                zero = ir.Constant(self.i32, 0)
-                valeur = self.builder.gep(valeur, [zero, zero])
+        """
+        [CORRIGÉ - VERSION ROBUSTE] Gère tous les cas de return.
+        """
+        # Vérifier si on a une expression
+        expression_ctx = ctx.expression()
+    
+        if expression_ctx is not None:
+            # return expression;
+            try:
+                valeur = self.visit(expression_ctx)
+            except Exception as e:
+                print(f"[ERREUR] Dans return: {e}")
+                valeur = None
+        
+            if valeur is None:
+                print("[DEBUG] return: valeur est None, retourne 0 par défaut")
+                # Déterminer le type de retour de la fonction
+                func_type = self.builder.block.function.return_value.type
+                if isinstance(func_type, ir.VoidType):
+                    self.builder.ret_void()
+                elif isinstance(func_type, ir.IntType):
+                    self.builder.ret(ir.Constant(func_type, 0))
+                elif isinstance(func_type, ir.DoubleType):
+                    self.builder.ret(ir.Constant(func_type, 0.0))
+                else:
+                    self.builder.ret(ir.Constant(self.void_ptr, None))
+                return
+        
+            # Si c'est un pointeur vers un tableau, le convertir
+            if hasattr(valeur, 'type'):
+                if isinstance(valeur.type, ir.PointerType) and isinstance(valeur.type.pointee, ir.ArrayType):
+                    zero = ir.Constant(self.i32, 0)
+                    valeur = self.builder.gep(valeur, [zero, zero])
+        
             self.builder.ret(valeur)
         else:
+            # return; sans expression
             self.builder.ret_void()
     
     # ============================================================
@@ -1397,7 +1571,7 @@ class CompilateurLLVM(RmLangVisitor):
     def visitFonction_membre(self, ctx):
         type_retour = ctx.type_().getText() if ctx.type_() else 'void'
         nom = ctx.ID().getText()
-        
+
         params = []
         param_names = []
         param_types = []
@@ -1408,7 +1582,7 @@ class CompilateurLLVM(RmLangVisitor):
                 params.append(p_type + " " + p_name)
                 param_names.append(p_name)
                 param_types.append(p_type)
-        
+
         if self.classe_courante in self.classes:
             self.classes[self.classe_courante]['methodes'][nom] = {
                 'type_retour': type_retour,
@@ -1417,7 +1591,14 @@ class CompilateurLLVM(RmLangVisitor):
                 'param_types': param_types,
                 'corps': ctx.bloc()
             }
-        
+
+            # NOUVEAU : assigner l'index tout de suite, dans l'ordre de déclaration
+            if self.classe_courante not in self.method_indices:
+                self.method_indices[self.classe_courante] = {}
+            if nom not in self.method_indices[self.classe_courante]:
+                idx = len(self.method_indices[self.classe_courante])
+                self.method_indices[self.classe_courante][nom] = idx
+
         return None
            
     def _resoudre_classe(self, nom):
@@ -1444,6 +1625,9 @@ class CompilateurLLVM(RmLangVisitor):
 
         old_classe = self.classe_courante
         self.classe_courante = classe
+
+        print(f"[DEBUG] visitMethod_call: {obj_nom}.{methode}(), args={len(args)}")
+
         result = self._call_method(obj_ptr, methode, args)
         self.classe_courante = old_classe
         return result
@@ -1511,35 +1695,67 @@ class CompilateurLLVM(RmLangVisitor):
         return None
     
     def visitCondition(self, ctx):
-        nb_conditions = len(ctx.expression())
+        """
+        [CORRIGÉ] Gère if/else if/else correctement.
+        """
+        # Récupérer toutes les expressions (conditions) et tous les blocs
+        expressions = ctx.expression()
+        blocs = ctx.bloc()
+        nb_conditions = len(expressions)
+    
+        # Vérifier s'il y a un else (plus de blocs que de conditions)
+        has_else = ctx.ELSE() is not None
+    
+        # Créer le bloc de fin
         end_block = self.builder.append_basic_block("if_end")
-        
+    
         for i in range(nb_conditions):
-            condition = self.visit(ctx.expression(i))
-            zero = ir.Constant(self.i32, 0)
-            cond = self.builder.icmp_signed('!=', condition, zero)
-            
-            then_block = self.builder.append_basic_block("if_then_" + str(i))
-            next_block = self.builder.append_basic_block("if_next_" + str(i))
-            
+            # Évaluer la condition
+            condition = self.visit(expressions[i])
+            cond = self._to_bool(condition)  # Utilise _to_bool pour gérer tous les types
+        
+            # Créer les blocs
+            then_block = self.builder.append_basic_block(f"if_then_{i}")
+        
+            # Déterminer le bloc suivant
+            if i == nb_conditions - 1:
+                # Dernière condition
+                if has_else:
+                    next_block = self.builder.append_basic_block("if_else")
+                else:
+                    next_block = end_block
+            else:
+                next_block = self.builder.append_basic_block(f"if_next_{i}")
+        
+            # Branchement conditionnel
             self.builder.cbranch(cond, then_block, next_block)
-            
+        
+            # Bloc then
             self.builder.position_at_start(then_block)
-            self.visit(ctx.bloc(i))
+            self.visit(blocs[i])  # Utilise la liste blocs
             if not self.builder.block.is_terminated:
                 self.builder.branch(end_block)
-            
+        
+            # Passer au bloc suivant
             self.builder.position_at_start(next_block)
-        
-        if ctx.ELSE():
-            self.visit(ctx.bloc(nb_conditions))
-            if not self.builder.block.is_terminated:
-                self.builder.branch(end_block)
+    
+        # Bloc else (s'il existe)
+        if has_else:
+            # Le dernier bloc est le else
+            else_bloc = blocs[-1]  # Dernier élément de la liste
+            if else_bloc is not None:
+                self.visit(else_bloc)
+                if not self.builder.block.is_terminated:
+                    self.builder.branch(end_block)
         else:
+            # S'assurer que le bloc est terminé
             if not self.builder.block.is_terminated:
                 self.builder.branch(end_block)
-        
+    
+        # Positionner à la fin
         self.builder.position_at_start(end_block)
+    
+        return None
     
     def visitBoucle_while(self, ctx):
         cond_block = self.builder.append_basic_block("while_cond")
@@ -1624,6 +1840,13 @@ class CompilateurLLVM(RmLangVisitor):
     # EXPRESSIONS - AVEC DISPATCH DE TYPE
     # ============================================================
     
+    def visitNullLiteral(self, ctx):
+        """
+        [NOUVEAU] Retourne un pointeur null (i8* null).
+        Le littéral 'null' représente un pointeur nul.
+        """
+        return ir.Constant(self.void_ptr, None)
+
     def visitIntLiteral(self, ctx):
         return ir.Constant(self.i32, int(ctx.getText()))
     
@@ -1991,6 +2214,517 @@ class CompilateurLLVM(RmLangVisitor):
     
         # Charger la valeur lue
         return self.builder.load(ptr)
+
+    # ============================================================
+    # VISITEURS POUR LES OPÉRATIONS FICHIER
+    # ============================================================
+    def visitFile_open_stmt(self, ctx):
+        """
+        [MODIFIÉ] file_open("test.txt", READ);
+        Retourne un i32 (FILE* casté).
+        """
+        nom_fichier = self.visit(ctx.expression())
+        mode = ctx.file_mode().getText()
+    
+        mode_map = {
+            'READ': 'r', 'WRITE': 'w', 'APPEND': 'a',
+            'READ_BIN': 'rb', 'WRITE_BIN': 'wb',
+        }
+        mode_str = mode_map.get(mode, 'r')
+    
+        mode_var = self._create_string(mode_str)
+        mode_ptr = self.builder.bitcast(mode_var, self.string_type)
+    
+        file_handle = self.builder.call(self.fopen, [nom_fichier, mode_ptr])
+    
+        null_ptr = ir.Constant(self.void_ptr, None)
+        est_nul = self.builder.icmp_signed('==', file_handle, null_ptr)
+    
+        success_block = self.builder.append_basic_block("file_open_ok")
+        error_block = self.builder.append_basic_block("file_open_error")
+        continue_block = self.builder.append_basic_block("file_open_end")
+    
+        self.builder.cbranch(est_nul, error_block, success_block)
+    
+        self.builder.position_at_start(error_block)
+        erreur_msg = self._create_string("Erreur: Impossible d'ouvrir le fichier\n")
+        erreur_ptr = self.builder.bitcast(erreur_msg, self.string_type)
+        self.builder.call(self.printf, [erreur_ptr])
+        self.builder.branch(continue_block)
+    
+        self.builder.position_at_start(success_block)
+        self.builder.branch(continue_block)
+    
+        self.builder.position_at_start(continue_block)
+    
+        # Retourner le FILE* casté en i32
+        return self.builder.ptrtoint(file_handle, self.i32)
+
+
+    def visitFile_close_stmt(self, ctx):
+        """file_close(handle) - handle est un i32"""
+        handle_as_int = self.visit(ctx.expression())
+        file_handle = self.builder.inttoptr(handle_as_int, self.void_ptr)
+        result = self.builder.call(self.fclose, [file_handle])
+        return result
+
+
+    def visitFile_write_stmt(self, ctx):
+        """file_write(handle, valeur)"""
+        handle_as_int = self.visit(ctx.expression(0))
+        valeur = self.visit(ctx.expression(1))
+        file_handle = self.builder.inttoptr(handle_as_int, self.void_ptr)
+    
+        if isinstance(valeur.type, ir.IntType):
+            if valeur.type.width == 8:
+                fmt = self._create_string("%c")
+            else:
+                fmt = self._create_string("%d")
+        elif isinstance(valeur.type, ir.DoubleType):
+            fmt = self._create_string("%f")
+        else:
+            fmt = self._create_string("%s")
+    
+        fmt_ptr = self.builder.bitcast(fmt, self.string_type)
+        result = self.builder.call(self.fprintf, [file_handle, fmt_ptr, valeur])
+        return result
+
+
+    def visitFile_read_stmt(self, ctx):
+        """file_read(handle, variable)"""
+        handle_as_int = self.visit(ctx.expression())
+        nom_var = ctx.ID().getText()
+        clean_nom = self._clean_name(nom_var)
+        file_handle = self.builder.inttoptr(handle_as_int, self.void_ptr)
+    
+        buffer_type = ir.ArrayType(self.i8, 1024)
+        buffer_ptr = self.builder.alloca(buffer_type, name="file_read_buf")
+        buffer_cast = self.builder.bitcast(buffer_ptr, self.string_type)
+    
+        taille = ir.Constant(self.i32, 1024)
+        result = self.builder.call(self.fgets, [buffer_cast, taille, file_handle])
+    
+        null_ptr = ir.Constant(self.string_type, None)
+        est_nul = self.builder.icmp_signed('==', result, null_ptr)
+    
+        success_block = self.builder.append_basic_block("file_read_ok")
+        error_block = self.builder.append_basic_block("file_read_error")
+        continue_block = self.builder.append_basic_block("file_read_end")
+    
+        self.builder.cbranch(est_nul, error_block, success_block)
+    
+        self.builder.position_at_start(error_block)
+        if clean_nom in self.variables:
+            empty = self._create_string("")
+            empty_ptr = self.builder.bitcast(empty, self.string_type)
+            self.builder.store(empty_ptr, self.variables[clean_nom])
+        self.builder.branch(continue_block)
+    
+        self.builder.position_at_start(success_block)
+        if clean_nom in self.variables:
+            self.builder.store(buffer_cast, self.variables[clean_nom])
+        self.builder.branch(continue_block)
+    
+        self.builder.position_at_start(continue_block)
+        return result
+    
+    # ============================================================
+    # EXPRESSIONS FICHIER (NOUVEAU)
+    # ============================================================
+
+    def visitFileOpenExpr(self, ctx):
+        """
+        Retourne directement le FILE* (i8*) - plus de ptrtoint !
+        """
+        nom_fichier = self.visit(ctx.expression())
+        mode = ctx.file_mode().getText()
+    
+        mode_map = {
+            'READ': 'r', 'WRITE': 'w', 'APPEND': 'a',
+            'READ_BIN': 'rb', 'WRITE_BIN': 'wb',
+        }
+        mode_str = mode_map.get(mode, 'r')
+    
+        mode_var = self._create_string(mode_str)
+        mode_ptr = self.builder.bitcast(mode_var, self.string_type)
+    
+        file_handle = self.builder.call(self.fopen, [nom_fichier, mode_ptr])
+    
+        # Vérifier erreur
+        null_ptr = ir.Constant(self.void_ptr, None)
+        est_nul = self.builder.icmp_signed('==', file_handle, null_ptr)
+    
+        success_block = self.builder.append_basic_block("file_open_ok")
+        error_block = self.builder.append_basic_block("file_open_error")
+        continue_block = self.builder.append_basic_block("file_open_end")
+    
+        self.builder.cbranch(est_nul, error_block, success_block)
+    
+        self.builder.position_at_start(error_block)
+        erreur_msg = self._create_string("Erreur: Impossible d'ouvrir le fichier\n")
+        erreur_ptr = self.builder.bitcast(erreur_msg, self.string_type)
+        self.builder.call(self.printf, [erreur_ptr])
+        self.builder.branch(continue_block)
+    
+        self.builder.position_at_start(success_block)
+        self.builder.branch(continue_block)
+    
+        self.builder.position_at_start(continue_block)
+    
+        # Retourner DIRECTEMENT le FILE* (i8*) - pas de ptrtoint !
+        return file_handle
+
+
+    def visitFileCloseExpr(self, ctx):
+        """file_close(handle) - handle est déjà i8*"""
+        file_handle = self.visit(ctx.expression())  # Déjà i8*
+        result = self.builder.call(self.fclose, [file_handle])
+        return result
+
+
+    def visitFileWriteExpr(self, ctx):
+        """file_write(handle, valeur) - handle est déjà i8*"""
+        file_handle = self.visit(ctx.expression(0))  # Déjà i8*
+        valeur = self.visit(ctx.expression(1))
+    
+        if isinstance(valeur.type, ir.IntType):
+            if valeur.type.width == 8:
+                fmt = self._create_string("%c")
+            else:
+                fmt = self._create_string("%d")
+            fmt_ptr = self.builder.bitcast(fmt, self.string_type)
+            result = self.builder.call(self.fprintf, [file_handle, fmt_ptr, valeur])
+        elif isinstance(valeur.type, ir.DoubleType):
+            fmt = self._create_string("%f")
+            fmt_ptr = self.builder.bitcast(fmt, self.string_type)
+            result = self.builder.call(self.fprintf, [file_handle, fmt_ptr, valeur])
+        else:
+            # Chaîne : utiliser fputs
+            result = self.builder.call(self.fputs, [valeur, file_handle])
+    
+        return result
+
+
+    def visitFileOZOZOZReadExpr(self, ctx):
+        """string s = file_read(handle) - handle est déjà i8*"""
+        file_handle = self.visit(ctx.expression())  # Déjà i8*
+    
+        buffer_type = ir.ArrayType(self.i8, 1024)
+        buffer_ptr = self.builder.alloca(buffer_type, name="file_read_buf")
+        buffer_cast = self.builder.bitcast(buffer_ptr, self.string_type)
+    
+        taille = ir.Constant(self.i32, 1024)
+        result = self.builder.call(self.fgets, [buffer_cast, taille, file_handle])
+        return result
+
+    def visitFileReadExpr(self, ctx):
+        """
+        string s = file_read(handle)
+        Retourne une chaîne allouée avec malloc (persiste après retour).
+        """
+        file_handle = self.visit(ctx.expression())
+    
+        # Allouer avec malloc (survit au retour de fonction)
+        taille = ir.Constant(self.i32, 1024)
+        buffer_ptr = self.builder.call(self.malloc, [taille])
+        buffer_cast = self.builder.bitcast(buffer_ptr, self.string_type)
+    
+        # Appeler fgets
+        result = self.builder.call(self.fgets, [buffer_cast, taille, file_handle])
+    
+        # Chaîne vide pour EOF
+        empty = self._create_string("")
+        empty_ptr = self.builder.bitcast(empty, self.string_type)
+    
+        # Vérifier si NULL (EOF)
+        null_ptr = ir.Constant(self.string_type, None)
+        est_nul = self.builder.icmp_signed('==', result, null_ptr)
+    
+        eof_block = self.builder.append_basic_block("read_eof")
+        ok_block = self.builder.append_basic_block("read_ok")
+        end_block = self.builder.append_basic_block("read_end")
+    
+        self.builder.cbranch(est_nul, eof_block, ok_block)
+    
+        self.builder.position_at_start(eof_block)
+        self.builder.branch(end_block)
+    
+        self.builder.position_at_start(ok_block)
+        self.builder.branch(end_block)
+    
+        self.builder.position_at_start(end_block)
+        phi = self.builder.phi(self.string_type)
+        phi.add_incoming(empty_ptr, eof_block)    # "" si EOF
+        phi.add_incoming(buffer_cast, ok_block)    # ligne lue sinon
+    
+        return phi
+
+
+    def visitFile_close_stmt(self, ctx):
+        """file_close(handle) - handle est déjà i8*"""
+        file_handle = self.visit(ctx.expression())  # Déjà i8*
+        result = self.builder.call(self.fclose, [file_handle])
+        return result
+
+
+    def visitFile_write_stmt(self, ctx):
+        """file_write(handle, valeur) - handle est déjà i8*"""
+        file_handle = self.visit(ctx.expression(0))  # Déjà i8*
+        valeur = self.visit(ctx.expression(1))
+    
+        if isinstance(valeur.type, ir.IntType):
+            if valeur.type.width == 8:
+                fmt = self._create_string("%c")
+            else:
+                fmt = self._create_string("%d")
+            fmt_ptr = self.builder.bitcast(fmt, self.string_type)
+            result = self.builder.call(self.fprintf, [file_handle, fmt_ptr, valeur])
+        elif isinstance(valeur.type, ir.DoubleType):
+            fmt = self._create_string("%f")
+            fmt_ptr = self.builder.bitcast(fmt, self.string_type)
+            result = self.builder.call(self.fprintf, [file_handle, fmt_ptr, valeur])
+        else:
+            result = self.builder.call(self.fputs, [valeur, file_handle])
+    
+        return result
+
+
+    def visitFile_read_stmt(self, ctx):
+        """file_read(handle, variable) - handle est déjà i8*"""
+        file_handle = self.visit(ctx.expression())  # Déjà i8*
+        nom_var = ctx.ID().getText()
+        clean_nom = self._clean_name(nom_var)
+    
+        buffer_type = ir.ArrayType(self.i8, 1024)
+        buffer_ptr = self.builder.alloca(buffer_type, name="file_read_buf")
+        buffer_cast = self.builder.bitcast(buffer_ptr, self.string_type)
+    
+        taille = ir.Constant(self.i32, 1024)
+        result = self.builder.call(self.fgets, [buffer_cast, taille, file_handle])
+    
+        null_ptr = ir.Constant(self.string_type, None)
+        est_nul = self.builder.icmp_signed('==', result, null_ptr)
+    
+        success_block = self.builder.append_basic_block("file_read_ok")
+        error_block = self.builder.append_basic_block("file_read_error")
+        continue_block = self.builder.append_basic_block("file_read_end")
+    
+        self.builder.cbranch(est_nul, error_block, success_block)
+    
+        self.builder.position_at_start(error_block)
+        if clean_nom in self.variables:
+            empty = self._create_string("")
+            empty_ptr = self.builder.bitcast(empty, self.string_type)
+            self.builder.store(empty_ptr, self.variables[clean_nom])
+        self.builder.branch(continue_block)
+    
+        self.builder.position_at_start(success_block)
+        if clean_nom in self.variables:
+            self.builder.store(buffer_cast, self.variables[clean_nom])
+        self.builder.branch(continue_block)
+    
+        self.builder.position_at_start(continue_block)
+        return result
+
+
+    def visitFile_open_stmt(self, ctx):
+        """
+        Instruction : file_open("test.txt", WRITE);
+        Retourne directement le FILE* (i8*).
+        """
+        nom_fichier = self.visit(ctx.expression())
+        mode = ctx.file_mode().getText()
+    
+        mode_map = {
+            'READ': 'r', 'WRITE': 'w', 'APPEND': 'a',
+            'READ_BIN': 'rb', 'WRITE_BIN': 'wb',
+        }
+        mode_str = mode_map.get(mode, 'r')
+    
+        mode_var = self._create_string(mode_str)
+        mode_ptr = self.builder.bitcast(mode_var, self.string_type)
+    
+        file_handle = self.builder.call(self.fopen, [nom_fichier, mode_ptr])
+    
+        null_ptr = ir.Constant(self.void_ptr, None)
+        est_nul = self.builder.icmp_signed('==', file_handle, null_ptr)
+    
+        success_block = self.builder.append_basic_block("file_open_ok")
+        error_block = self.builder.append_basic_block("file_open_error")
+        continue_block = self.builder.append_basic_block("file_open_end")
+    
+        self.builder.cbranch(est_nul, error_block, success_block)
+    
+        self.builder.position_at_start(error_block)
+        erreur_msg = self._create_string("Erreur: Impossible d'ouvrir le fichier\n")
+        erreur_ptr = self.builder.bitcast(erreur_msg, self.string_type)
+        self.builder.call(self.printf, [erreur_ptr])
+        self.builder.branch(continue_block)
+    
+        self.builder.position_at_start(success_block)
+        self.builder.branch(continue_block)
+    
+        self.builder.position_at_start(continue_block)
+    
+        # Retourner DIRECTEMENT le FILE* (i8*)
+        return file_handle
+
+    # ============================================================
+    # FICHIERS BINAIRES - CORRIGÉS (pas de conversion i32)
+    # ============================================================
+
+    def visitFile_read_binary_stmt(self, ctx):
+        """
+        file_read_bin(handle, int, variable)
+        handle est déjà i8* (FILE*)
+        """
+        file_handle = self.visit(ctx.expression())  # Déjà i8*
+        type_donnee = ctx.type_().getText()
+        nom_var = ctx.ID().getText()
+        clean_nom = self._clean_name(nom_var)
+    
+        print(f"[DEBUG] file_read_bin: type={type_donnee}, var={clean_nom}")
+    
+        # Allouer de l'espace pour la donnée
+        llvm_type = self._get_llvm_type(type_donnee)
+        ptr = self.builder.alloca(llvm_type, name=f"read_bin_{clean_nom}")
+    
+        # Taille en octets
+        taille_octets = self._get_type_size(llvm_type)
+        taille_val = ir.Constant(self.i32, taille_octets)
+        count_val = ir.Constant(self.i32, 1)
+        ptr_cast = self.builder.bitcast(ptr, self.void_ptr)
+    
+        # Appeler fread(ptr, size, 1, file) - PAS de inttoptr !
+        self.builder.call(self.fread, [ptr_cast, taille_val, count_val, file_handle])
+    
+        # Charger la valeur lue
+        valeur_lue = self.builder.load(ptr)
+    
+        # Stocker dans la variable
+        if clean_nom in self.variables:
+            self.builder.store(valeur_lue, self.variables[clean_nom])
+    
+        return valeur_lue
+
+
+    def visitFile_write_binary_stmt(self, ctx):
+        """
+        file_write_bin(handle, valeur)
+        handle est déjà i8* (FILE*)
+        """
+        file_handle = self.visit(ctx.expression(0))  # Déjà i8*
+        valeur = self.visit(ctx.expression(1))
+    
+        print(f"[DEBUG] file_write_bin: type valeur={valeur.type}")
+    
+        # Allouer un espace temporaire pour la valeur
+        ptr = self.builder.alloca(valeur.type, name="write_bin_tmp")
+        self.builder.store(valeur, ptr)
+    
+        # Taille en octets
+        taille_octets = self._get_type_size(valeur.type)
+        taille_val = ir.Constant(self.i32, taille_octets)
+        count_val = ir.Constant(self.i32, 1)
+        ptr_cast = self.builder.bitcast(ptr, self.void_ptr)
+    
+        # Appeler fwrite(ptr, size, 1, file) - PAS de inttoptr !
+        result = self.builder.call(self.fwrite, [ptr_cast, taille_val, count_val, file_handle])
+    
+        return result
+
+
+    # ============================================================
+    # EXPRESSIONS BINAIRES (dans les expressions)
+    # ============================================================
+
+    def visitFileReadBinExpr(self, ctx):
+        """
+        int x = file_read_bin(handle, int)
+        handle est déjà i8* (FILE*)
+        """
+        file_handle = self.visit(ctx.expression())  # Déjà i8*
+        type_donnee = ctx.type_().getText()
+    
+        print(f"[DEBUG] FileReadBinExpr: type={type_donnee}")
+    
+        # Allouer de l'espace
+        llvm_type = self._get_llvm_type(type_donnee)
+        ptr = self.builder.alloca(llvm_type, name="read_bin_expr")
+    
+        # Taille en octets
+        taille_octets = self._get_type_size(llvm_type)
+        taille_val = ir.Constant(self.i32, taille_octets)
+        count_val = ir.Constant(self.i32, 1)
+        ptr_cast = self.builder.bitcast(ptr, self.void_ptr)
+    
+        # Lire - PAS de inttoptr !
+        self.builder.call(self.fread, [ptr_cast, taille_val, count_val, file_handle])
+    
+        # Retourner la valeur lue
+        return self.builder.load(ptr)
+
+
+    def visitFileWriteBinExpr(self, ctx):
+        """
+        int r = file_write_bin(handle, valeur)
+        handle est déjà i8* (FILE*)
+        """
+        file_handle = self.visit(ctx.expression(0))  # Déjà i8*
+        valeur = self.visit(ctx.expression(1))
+    
+        print(f"[DEBUG] FileWriteBinExpr: type={valeur.type}")
+    
+        # Allouer espace temporaire
+        ptr = self.builder.alloca(valeur.type, name="write_bin_expr_tmp")
+        self.builder.store(valeur, ptr)
+    
+        # Taille en octets
+        taille_octets = self._get_type_size(valeur.type)
+        taille_val = ir.Constant(self.i32, taille_octets)
+        count_val = ir.Constant(self.i32, 1)
+        ptr_cast = self.builder.bitcast(ptr, self.void_ptr)
+    
+        # Écrire - PAS de inttoptr !
+        result = self.builder.call(self.fwrite, [ptr_cast, taille_val, count_val, file_handle])
+    
+        return result
+
+    def visitFileEofExpr(self, ctx):
+        """
+        bool fin = file_eof(handle)
+        Retourne true si fin de fichier atteinte.
+        """
+        file_handle = self.visit(ctx.expression())
+    
+        # Appeler feof(FILE*)
+        result = self.builder.call(self.feof, [file_handle])
+    
+        # feof retourne non-zéro si EOF
+        zero = ir.Constant(self.i32, 0)
+        est_eof = self.builder.icmp_signed('!=', result, zero)
+    
+        # Convertir en i32 (bool RmLang)
+        return self.builder.zext(est_eof, self.i32)
+
+    # ============================================================
+    # FONCTIONS UTILITAIRES
+    # ============================================================
+
+    def _get_type_size(self, llvm_type):
+        """
+        Retourne la taille en octets d'un type LLVM.
+        """
+        if isinstance(llvm_type, ir.IntType):
+            return llvm_type.width // 8  # i8=1, i32=4, i64=8
+        elif isinstance(llvm_type, ir.DoubleType):
+            return 8
+        elif isinstance(llvm_type, ir.FloatType):
+            return 4
+        elif isinstance(llvm_type, ir.PointerType):
+            return 8  # Pointeur 64 bits
+        else:
+            return 4  # Par défaut
 
 # ============================================================
 # COMPILATION
