@@ -18,7 +18,7 @@ The **.rm files** are some example of the langage RM.
 
 ## How to understand with AI?
 
-First, copy/paste in Deepseek (Fast Mode), the code you want to understand, and when Deepseek didn't resolve many times try Claude (Medium Mode). Deepseek didn't resolve the problem sometimes.
+First, copy/paste in Deepseek (Fast Mode), the code you want to understand, and when Deepseek didn't resolve many times try Claude (Medium Mode). Deepseek didn't resolve the problem sometimes (get up to Expert mode otherwise).
 
 Use more Deepseek because it's unlimited and full power beast. https://chat.deepseek.com/
 
