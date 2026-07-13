@@ -2,7 +2,7 @@
 
 ## How to use it ?
 
-1. Create the parser File with testc.bat. (Only to create the new grammar file, if the RmLang*.* didn't exist)
+1. Create the parser File with testc.bat. (Only to create the new grammar file, if the RmLang*.* didn't exist). If you don't modify the grammar in*.g4 file skip to step 2).
 
 2. Compile with ipython3 compile_rm.py exemple.rm (exemple.rm or another file *.rm). (Create your own program directly in rm files and compile in an exe file to execute the program.)
 
