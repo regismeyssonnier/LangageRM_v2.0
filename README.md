@@ -4,7 +4,7 @@
 
 1. Create the parser File with testc.bat.
 
-2. Compile with ipython3 compile_rm.py exemple.rm
+2. Compile with ipython3 compile_rm.py exemple.rm (exemple.rm or another file *.rm).
 
 (3.) test.bat isn't the same like testc.bat, it creates the parser and interpret the langage file with test_rm.py(look at the command) OBSOLETE (it's just an example ANTLR)
 
