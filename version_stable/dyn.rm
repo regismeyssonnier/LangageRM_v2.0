@@ -1,0 +1,26 @@
+func void main() {
+    // Allocation dynamique d'un tableau
+    int* tab = new int[10];
+    
+    // Utilisation
+    tab[0] = 42;
+    tab[1] = 123;
+    
+    int x = tab[0];
+    println(x);
+    println(tab[1]);
+
+    char* buffer = new char[10];
+
+    buffer[0] = 'A';
+
+    println(buffer[0]);
+    
+    buffer[1] = 'B';
+
+    println(buffer[1]);
+
+    // Libération
+    free(tab);
+    free(buffer);
+}

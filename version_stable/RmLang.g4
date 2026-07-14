@@ -18,8 +18,20 @@ array_init
     : '{' expression (',' expression)* '}'
     ;
 
+// Remplacer la règle type actuelle par :
 type
-    : 'char' | 'int' | 'double' | 'float' | 'string' | 'bool' | 'void' | ID
+    : type_base ('*')*
+    ;
+
+type_base
+    : 'char' 
+    | 'int' 
+    | 'double' 
+    | 'float' 
+    | 'string' 
+    | 'bool' 
+    | 'void' 
+    | ID
     ;
 
 fonction
@@ -63,6 +75,7 @@ instruction
     | affectation_membre_tableau
     | affectation_membre
     | affectation_tableau
+    | affectation_pointeur         // *ptr = valeur
     | method_call ';'
     | retour
     | appel_fonction ';'
@@ -74,6 +87,7 @@ instruction
     | 'continue' ';'
     | print_stmt ';'
     | println_stmt ';'
+    | free_stmt ';'                // free(ptr)
     // Fichiers (instructions)
     | file_open_stmt ';'
     | file_close_stmt ';'
@@ -95,6 +109,7 @@ affectation
 affectation_composee
     : ID COMPOUND_ASSIGN expression ';'                    # SimpleCompoundAssign
     | ID '[' expression ']' COMPOUND_ASSIGN expression ';' # ArrayCompoundAssign
+    | '*' expression COMPOUND_ASSIGN expression ';'        # PointerCompoundAssign
     ;
 
 affectation_membre
@@ -107,6 +122,18 @@ affectation_tableau
 
 affectation_membre_tableau
     : objectRef '.' ID '[' expression ']' '=' expression ';'
+    ;
+
+affectation_pointeur
+    : '*' expression '=' expression ';'    // *ptr = valeur
+    ;
+
+// ============================================================
+// GESTION MÉMOIRE
+// ============================================================
+
+free_stmt
+    : 'free' '(' expression ')'            // free(ptr)
     ;
 
 // ============================================================
@@ -221,6 +248,8 @@ expression
     | ID '[' expression ']'                               # ArrayAccessExpr
     | ID '(' argument_list? ')'                           # CallExpr
     | '(' expression ')'                                  # ParensExpr
+    | 'new' type '[' expression ']'                       # NewArrayExpr        // new int[10]
+    | 'sizeof' '(' type ')'                               # SizeOfExpr          // sizeof(int)
     | INT                                                 # IntLiteral
     | FLOAT                                               # FloatLiteral
     | STRING                                              # StringLiteral
@@ -237,12 +266,12 @@ expression
     | '-' expression                                      # UnaryMinusExpr
     | '+' expression                                      # UnaryPlusExpr
     //FICHIERS
-    | 'file_open' '(' expression ',' file_mode ')'         # FileOpenExpr       // int h = file_open("f.txt", READ)
-    | 'file_close' '(' expression ')'                      # FileCloseExpr      // int r = file_close(h)
-    | 'file_read' '(' expression ')'                       # FileReadExpr       // string s = file_read(h)
-    | 'file_read_bin' '(' expression ',' type ')'          # FileReadBinExpr    // int x = file_read_bin(h, int)
-    | 'file_write' '(' expression ',' expression ')'       # FileWriteExpr      // int r = file_write(h, "Hello")
-    | 'file_write_bin' '(' expression ',' expression ')'   # FileWriteBinExpr   // int r = file_write_bin(h, val)
+    | 'file_open' '(' expression ',' file_mode ')'         # FileOpenExpr
+    | 'file_close' '(' expression ')'                      # FileCloseExpr
+    | 'file_read' '(' expression ')'                       # FileReadExpr
+    | 'file_read_bin' '(' expression ',' type ')'          # FileReadBinExpr
+    | 'file_write' '(' expression ',' expression ')'       # FileWriteExpr
+    | 'file_write_bin' '(' expression ',' expression ')'   # FileWriteBinExpr
     | 'file_eof' '(' expression ')'                        # FileEofExpr
     // Opérateurs binaires
     | expression '*' expression                           # MulExpr
@@ -288,6 +317,9 @@ INPUT       : 'input';
 REF         : 'ref';
 THIS        : 'this';
 NULL        : 'null';
+NEW         : 'new';
+SIZEOF      : 'sizeof';
+FREE        : 'free';
 
 // Types
 CHAR_TYPE   : 'char';

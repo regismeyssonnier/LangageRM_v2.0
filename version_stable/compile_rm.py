@@ -50,6 +50,7 @@ class CompilateurLLVM(RmLangVisitor):
         # Types LLVM
         self.i8 = ir.IntType(8)
         self.i32 = ir.IntType(32)
+        self.i64 = ir.IntType(64)
         self.double = ir.DoubleType()
         self.void = ir.VoidType()
         self.string_type = ir.PointerType(self.i8)
@@ -130,6 +131,9 @@ class CompilateurLLVM(RmLangVisitor):
         self.fputs = ir.Function(self.module, fputs_ty, name="fputs")
 
         self.file_read_buffer = None
+
+        #free all malloc
+        self.free_all_malloc = []
     
     def _clean_name(self, name):
         if name is None:
@@ -155,8 +159,23 @@ class CompilateurLLVM(RmLangVisitor):
         self.puts = ir.Function(self.module, puts_ty, name="puts")
     
     def _declare_malloc(self):
-        malloc_ty = ir.FunctionType(self.void_ptr, [self.i32])
-        self.malloc = ir.Function(self.module, malloc_ty, name="malloc")
+        """Déclare OU REDÉCLARE la fonction malloc avec le bon type i64"""
+        # Vérifier si malloc existe déjà avec le mauvais type
+        if hasattr(self, 'malloc'):
+            # Vérifier le type du premier argument
+            if len(self.malloc.args) > 0 and self.malloc.args[0].type != ir.IntType(64):
+                print("[DEBUG] malloc a le mauvais type, suppression et redéclaration")
+                # Supprimer l'ancienne déclaration
+                del self.malloc
+    
+        if not hasattr(self, 'malloc'):
+            # malloc prend un i64 et retourne i8*
+            malloc_ty = ir.FunctionType(
+                ir.PointerType(ir.IntType(8)),  # retourne i8*
+                [ir.IntType(64)]                 # prend i64
+            )
+            self.malloc = ir.Function(self.module, malloc_ty, name="malloc")
+            print(f"[DEBUG] malloc déclaré avec i64: {[a.type for a in self.malloc.args]}")
     
     def _declare_free(self):
         free_ty = ir.FunctionType(self.void, [self.void_ptr])
@@ -391,9 +410,9 @@ class CompilateurLLVM(RmLangVisitor):
         td = binding.create_target_data(self.module.data_layout)
         size = struct_type.get_abi_size(td)
     
-        ptr = self.builder.call(self.malloc, [ir.Constant(self.i32, size)])
+        ptr = self.builder.call(self.malloc, [ir.Constant(self.i64, size)])
         ptr = self.builder.bitcast(ptr, struct_type.as_pointer())
-    
+            
         vtable_field = self.builder.gep(ptr, [ir.Constant(self.i32, 0), ir.Constant(self.i32, 0)])
         vtable_ptr_cast = self.builder.bitcast(vtable_ptr, self.void_ptr)
         self.builder.store(vtable_ptr_cast, vtable_field)
@@ -985,6 +1004,8 @@ class CompilateurLLVM(RmLangVisitor):
             self.builder.ret(ir.Constant(self.i32, 0))
             self.builder = old_builder
 
+        
+
         return None
     
     # ============================================================
@@ -998,7 +1019,7 @@ class CompilateurLLVM(RmLangVisitor):
         input_stream = ctx.start.getInputStream()
         return input_stream.getText(start_index, stop_index)
 
-    def visitDeclaration(self, ctx):
+    def visitAncDeclaration(self, ctx):
         if ctx.REF():
             type_var = ctx.type_().getText()
             nom = ctx.ID(0).getText()        # "z"
@@ -1014,6 +1035,8 @@ class CompilateurLLVM(RmLangVisitor):
 
         type_var = ctx.type_().getText()
         nom = ctx.ID(0).getText()
+
+
 
         print(f"[DEBUG] visitDeclaration: type={type_var}, nom={nom}, builder={self.builder is not None}")
 
@@ -1040,6 +1063,7 @@ class CompilateurLLVM(RmLangVisitor):
 
         clean_nom = self._clean_name(nom)
         texte = self._get_original_text(ctx)
+
 
         # Détection tableau
         
@@ -1183,6 +1207,8 @@ class CompilateurLLVM(RmLangVisitor):
             self.array_types[clean_nom] = type_var
             return ptr
 
+        
+
         # ============================================================
         # VARIABLE NORMALE
         # ============================================================
@@ -1260,11 +1286,459 @@ class CompilateurLLVM(RmLangVisitor):
                 self.builder.store(ir.Constant(self.void_ptr, None), ptr)
 
         return ptr
+
+    def visitDeclaration(self, ctx):
+        if ctx.REF():
+            type_var = ctx.type_().getText()
+            nom = ctx.ID(0).getText()
+            ref_nom = ctx.ID(1).getText()
+
+            clean_nom = self._clean_name(nom)
+            clean_ref = self._clean_name(ref_nom)
+
+            if clean_ref in self.variables:
+                self.variables[clean_nom] = self.variables[clean_ref]
+            return None
+
+        # ============================================================
+        # DÉTECTION TYPE POINTEUR
+        # ============================================================
+        type_var = ctx.type_().getText()
+        est_pointeur = '*' in type_var
+    
+        if est_pointeur:
+            # Type de base sans les étoiles
+            type_base = type_var.replace('*', '').strip()
+            nb_etoiles = type_var.count('*')
+        else:
+            type_base = type_var
+            nb_etoiles = 0
+
+        nom = ctx.ID(0).getText()
+
+        print(f"[DEBUG] visitDeclaration: type={type_var}, nom={nom}, pointeur={est_pointeur}, builder={self.builder is not None}")
+
+        if self.en_scan_classe:
+            # Détecter si initialisation avec new
+            texte = self._get_original_text(ctx)
+            has_new = 'new' in texte
+        
+            if has_new:
+                # Extraire la taille du new
+                match = re.search(r'new\s+\w+\s*\[(\d+)\]', texte)
+                if match:
+                    array_size = int(match.group(1))
+                    self.classes[self.classe_courante]['membres'].append({
+                        'nom': nom,
+                        'type': type_var,
+                        'is_pointer': True,
+                        'has_malloc': True,
+                        'malloc_size': array_size
+                    })
+                    return None
+
+            if self.classe_courante not in self.classes:
+                self.classes[self.classe_courante] = {'membres': [], 'methodes': {}}
+
+            texte = self._get_original_text(ctx)
+            is_array = bool(re.search(r'\b' + re.escape(nom) + r'\s*\[', texte))
+            array_size = 1
+            if is_array:
+                m = re.search(r'\[([^\]]+)\]', texte)
+                if m:
+                    try:
+                        array_size = int(m.group(1))
+                    except:
+                        array_size = 256
+
+            self.classes[self.classe_courante]['membres'].append({
+                'nom': nom, 'type': type_var,
+                'is_array': is_array, 'array_size': array_size,
+                'is_pointer': est_pointeur
+            })
+            return None
+
+        clean_nom = self._clean_name(nom)
+        texte = self._get_original_text(ctx)
+
+        # ============================================================
+        # DÉCLARATION POINTEUR
+        # ============================================================
+        if est_pointeur:
+            return self._visitDeclarationPointeur(ctx, type_base, nb_etoiles, clean_nom, nom)
+
+        # ============================================================
+        # DÉTECTION TABLEAU
+        # ============================================================
+        pattern = r'\b' + re.escape(nom) + r'\s*\['
+        est_tableau = bool(re.search(pattern, texte))
+
+        if est_tableau:
+            return self._visitDeclarationTableau(ctx, type_var, nom, clean_nom, texte)
+
+        # ============================================================
+        # VARIABLE NORMALE
+        # ============================================================
+        return self._visitDeclarationSimple(ctx, type_var, clean_nom)
+
+
+    def _visitDeclarationPointeur(self, ctx, type_base, nb_etoiles, clean_nom, nom):
+        """
+        Gère la déclaration de pointeurs : int* ptr, char* str, etc.
+        """
+        # Convertir le type de base en type LLVM
+        type_llvm_base = self._get_llvm_type(type_base)
+    
+        # Ajouter les niveaux de pointeur
+        type_llvm = type_llvm_base
+        for _ in range(nb_etoiles):
+            type_llvm = ir.PointerType(type_llvm)
+    
+        if self.builder is None:
+            # Variable globale pointeur
+            global_var = ir.GlobalVariable(self.module, type_llvm, name=clean_nom)
+            global_var.initializer = ir.Constant(type_llvm, None)  # null
+            self.variables[clean_nom] = global_var
+            return global_var
+    
+        # Variable locale pointeur
+        ptr = self.builder.alloca(type_llvm, name=clean_nom)
+    
+        if ctx.expression():
+            valeur = self.visit(ctx.expression())
+        
+            # Vérifier la compatibilité des types
+            if isinstance(valeur.type, ir.PointerType):
+                self.builder.store(valeur, ptr)
+            else:
+                print(f"[ERREUR] Type incompatible pour pointeur: {valeur.type}")
+                self.builder.store(ir.Constant(type_llvm, None), ptr)
+        else:
+            # Initialiser à null
+            self.builder.store(ir.Constant(type_llvm, None), ptr)
+    
+        self.variables[clean_nom] = ptr
+        self.var_types[clean_nom] = f"{type_base}{'*' * nb_etoiles}"
+    
+        return ptr
+
+
+    def _visitDeclarationTableau(self, ctx, type_var, nom, clean_nom, texte):
+        """Gère la déclaration de tableaux fixes"""
+    
+        # Extraire la taille
+        match = re.search(r'\[([^\]]+)\]', texte)
+        taille_val = 5
+        if match:
+            try:
+                taille_val = int(match.group(1))
+            except:
+                taille_val = 5
+
+        # Extraire les valeurs d'initialisation
+        match_init = re.search(r'\{([^}]*)\}', texte)
+        valeurs_init = []
+
+        if match_init:
+            content = match_init.group(1).strip()
+            if content:
+                parts = []
+                current = ""
+                in_string = False
+                for c in content:
+                    if c == '"':
+                        in_string = not in_string
+                        current += c
+                    elif c == ',' and not in_string:
+                        parts.append(current.strip())
+                        current = ""
+                    else:
+                        current += c
+                if current.strip():
+                    parts.append(current.strip())
+
+                for v in parts:
+                    v = v.strip()
+                    if not v:
+                        continue
+                    valeur = self._parse_valeur_init(v, type_var)
+                    if valeur is not None:
+                        valeurs_init.append(valeur)
+
+        if valeurs_init:
+            taille_val = len(valeurs_init)
+
+        # Créer le tableau
+        elem_type = self._get_llvm_type(type_var)
+        array_type = ir.ArrayType(elem_type, taille_val)
+
+        if self.builder is None:
+            # Variable globale tableau
+            global_array = ir.GlobalVariable(self.module, array_type, name=clean_nom)
+            init_values = self._completer_init_values(valeurs_init, taille_val, type_var)
+            global_array.initializer = ir.Constant(array_type, init_values)
+            self.variables[clean_nom] = global_array
+            self.array_types[clean_nom] = type_var
+            return global_array
+
+        # Tableau local
+        ptr = self.builder.alloca(array_type, name=clean_nom)
+
+        if type_var == 'char':
+            char_ptr = self.builder.bitcast(ptr, self.string_type)
+            self.variables[clean_nom + "_ptr"] = char_ptr
+
+        for i in range(taille_val):
+            elem_ptr = self.builder.gep(ptr, [ir.Constant(self.i32, 0), ir.Constant(self.i32, i)])
+            if i < len(valeurs_init):
+                self.builder.store(valeurs_init[i], elem_ptr)
+            else:
+                val_defaut = self._get_valeur_defaut(type_var)
+                self.builder.store(val_defaut, elem_ptr)
+
+        self.variables[clean_nom] = ptr
+        self.array_types[clean_nom] = type_var
+        return ptr
+
+
+    def _visitDeclarationSimple(self, ctx, type_var, clean_nom):
+        """Gère la déclaration de variables simples"""
+    
+        if self.builder is None:
+            llvm_type = self._get_llvm_type(type_var)
+            global_var = ir.GlobalVariable(self.module, llvm_type, name=clean_nom)
+            global_var.initializer = self._get_valeur_defaut(type_var)
+            self.variables[clean_nom] = global_var
+            if type_var not in ('int', 'double', 'float', 'string', 'bool', 'void', 'char'):
+                self.var_types[clean_nom] = type_var
+            return global_var
+
+        llvm_type = self._get_llvm_type(type_var)
+        ptr = self.builder.alloca(llvm_type, name=clean_nom)
+        self.variables[clean_nom] = ptr
+
+        if type_var not in ('int', 'double', 'float', 'string', 'bool', 'void', 'char'):
+            self.var_types[clean_nom] = type_var
+
+        if ctx.expression():
+            valeur = self.visit(ctx.expression())
+            valeur = self._convertir_valeur(valeur, type_var)
+            self.builder.store(valeur, ptr)
+        else:
+            val_defaut = self._get_valeur_defaut(type_var)
+            self.builder.store(val_defaut, ptr)
+
+        return ptr
+
+
+    def _parse_valeur_init(self, v, type_var):
+        """Parse une valeur d'initialisation"""
+        v = v.strip()
+        if not v:
+            return None
+    
+        if type_var == 'string':
+            if v.startswith('"') and v.endswith('"'):
+                str_var = self._create_string(v[1:-1])
+                if self.builder:
+                    return self.builder.bitcast(str_var, self.string_type)
+                else:
+                    zero = ir.Constant(self.i32, 0)
+                    return str_var.gep([zero, zero])
+        elif type_var == 'int':
+            if v.isdigit() or (v.startswith('-') and v[1:].isdigit()):
+                return ir.Constant(self.i32, int(v))
+        elif type_var == 'double':
+            try:
+                return ir.Constant(self.double, float(v))
+            except:
+                pass
+        elif type_var == 'bool':
+            return ir.Constant(self.i32, 1 if v == 'true' else 0)
+        elif type_var == 'char':
+            if v.startswith("'") and v.endswith("'"):
+                return ir.Constant(self.i8, ord(v[1:-1]))
+            elif v.isdigit():
+                return ir.Constant(self.i8, int(v))
+    
+        return None
+
+
+    def _completer_init_values(self, valeurs_init, taille, type_var):
+        """Complète les valeurs d'initialisation avec des valeurs par défaut"""
+        result = []
+        for i in range(taille):
+            if i < len(valeurs_init):
+                result.append(valeurs_init[i])
+            else:
+                result.append(self._get_valeur_defaut(type_var))
+        return result
+
+
+    def _get_valeur_defaut(self, type_var):
+        """Retourne la valeur par défaut pour un type donné"""
+        if type_var == 'int':
+            return ir.Constant(self.i32, 0)
+        elif type_var == 'double':
+            return ir.Constant(self.double, 0.0)
+        elif type_var == 'float':
+            return ir.Constant(ir.FloatType(), 0.0)
+        elif type_var == 'bool':
+            return ir.Constant(self.i32, 0)
+        elif type_var == 'string':
+            empty = self._create_string("")
+            if self.builder:
+                return self.builder.bitcast(empty, self.string_type)
+            else:
+                zero = ir.Constant(self.i32, 0)
+                return empty.gep([zero, zero])
+        elif type_var == 'char':
+            return ir.Constant(self.i8, 0)
+        else:
+            return ir.Constant(self.void_ptr, None)
+
+
+    def _convertir_valeur(self, valeur, type_var):
+        """Convertit une valeur vers le type cible si nécessaire"""
+        if type_var == 'string':
+            if isinstance(valeur.type, ir.IntType):
+                str_val = self._create_string(str(valeur.constant))
+                return self.builder.bitcast(str_val, self.string_type)
+            elif isinstance(valeur.type, ir.PointerType) and isinstance(valeur.type.pointee, ir.ArrayType):
+                zero = ir.Constant(self.i32, 0)
+                return self.builder.gep(valeur, [zero, zero])
+            elif isinstance(valeur.type, ir.ArrayType) and isinstance(valeur.type.element, ir.IntType) and valeur.type.element.width == 8:
+                zero = ir.Constant(self.i32, 0)
+                return self.builder.gep(valeur, [zero, zero])
+        elif type_var == 'char':
+            if isinstance(valeur.type, ir.IntType) and valeur.type.width == 32:
+                return self.builder.trunc(valeur, self.i8)
+    
+        return valeur
+
+
     
     # ============================================================
     # ARRAYS
     # ============================================================
-    def _get_member_array_element_ptr(self, obj_ptr, classe, champ, index):
+    def _allouer_tableau_malloc(self, type_elem, nb_elements):
+        """
+        Alloue un tableau avec malloc
+        type_elem: type LLVM des éléments (i32, i8, etc.)
+        nb_elements: nombre d'éléments (Value LLVM i32)
+        """
+       
+        # Calculer la taille d'un élément en octets
+        if isinstance(type_elem, ir.IntType):
+            taille_elem = type_elem.width // 8
+        elif isinstance(type_elem, ir.FloatType):
+            taille_elem = 4
+        elif isinstance(type_elem, ir.DoubleType):
+            taille_elem = 8
+        else:
+            taille_elem = 1
+    
+        # DEBUG
+        print(f"[DEBUG] _allouer_tableau_malloc: type_elem={type_elem}, nb_elements={nb_elements}, type(nb_elements)={type(nb_elements)}")
+        if hasattr(nb_elements, 'type'):
+            print(f"[DEBUG] nb_elements.type={nb_elements.type}")
+        print(f"[DEBUG] taille_elem={taille_elem}")
+    
+        # S'assurer que nb_elements est un Value i32
+        if isinstance(nb_elements, int):
+            nb_elements = ir.Constant(ir.IntType(32), nb_elements)
+            print(f"[DEBUG] nb_elements converti en Constant i32")
+    
+        # Si nb_elements n'est pas i32, le convertir
+        if hasattr(nb_elements, 'type') and nb_elements.type != ir.IntType(32):
+            print(f"[DEBUG] Conversion de {nb_elements.type} vers i32")
+            nb_elements = self.builder.zext(nb_elements, ir.IntType(32))
+    
+        # Calculer taille totale
+        const_taille_elem = ir.Constant(ir.IntType(32), taille_elem)
+        taille_totale = self.builder.mul(nb_elements, const_taille_elem)
+    
+        print(f"[DEBUG] taille_totale.type={taille_totale.type}")
+    
+        # Convertir en i64
+        taille_i64 = self.builder.zext(taille_totale, ir.IntType(64))
+    
+        print(f"[DEBUG] taille_i64.type={taille_i64.type}")
+        print(f"[DEBUG] malloc type args: {[arg.type for arg in self.malloc.args]}")
+    
+        # Appeler malloc
+        ptr_i8 = self.builder.call(self.malloc, [taille_i64])
+    
+        # Convertir vers le bon type
+        ptr_type = ir.PointerType(type_elem)
+        ptr = self.builder.bitcast(ptr_i8, ptr_type)
+    
+        # Enregistrer pour libération
+        if not hasattr(self, 'free_all_malloc'):
+            self.free_all_malloc = []
+        self.free_all_malloc.append(ptr_i8)
+    
+        return ptr
+
+    def visitNewArrayExpr(self, ctx):
+        """
+        new int[10]
+        Retourne un pointeur vers le tableau alloué avec malloc
+        """
+        # Récupérer le type
+        type_str = ctx.type_().getText()
+    
+        # Récupérer la taille
+        taille = self.visit(ctx.expression())
+    
+        # Convertir le type string en type LLVM
+        if type_str == 'int':
+            type_elem = ir.IntType(32)
+        elif type_str == 'char':
+            type_elem = ir.IntType(8)
+        elif type_str == 'float':
+            type_elem = ir.FloatType()
+        elif type_str == 'double':
+            type_elem = ir.DoubleType()
+        else:
+            # Type personnalisé ?
+            type_elem = ir.IntType(8)
+    
+        # Allouer avec malloc
+        ptr_tableau = self._allouer_tableau_malloc(type_elem, taille)
+    
+        return ptr_tableau
+
+    def visitFreeStmt(self, ctx):
+        """
+        free(ptr);
+        Libère la mémoire allouée
+        """
+        # Récupérer le pointeur
+        ptr = self.visit(ctx.expression())
+    
+        # Vérifier que c'est un pointeur
+        if not isinstance(ptr.type, ir.PointerType):
+            print("[ERREUR] free() attend un pointeur")
+            return None
+    
+        # Déclarer free si nécessaire
+        self._declare_free()
+    
+        # Convertir en i8* pour free()
+        if ptr.type != self.void_ptr:
+            ptr = self.builder.bitcast(ptr, self.void_ptr)
+    
+        # Appeler free
+        self.builder.call(self.free, [ptr])
+    
+        # Retirer de la liste des allocations
+        if hasattr(self, 'free_all_malloc') and ptr in self.free_all_malloc:
+            self.free_all_malloc.remove(ptr)
+    
+        return None
+
+    def Orig_get_member_array_element_ptr(self, obj_ptr, classe, champ, index):
         idx = self._get_field_index(classe, champ)
         if idx == -1:
             return None
@@ -1273,6 +1747,61 @@ class CompilateurLLVM(RmLangVisitor):
         field_ptr = self.builder.gep(obj_struct, [ir.Constant(self.i32, 0), ir.Constant(self.i32, idx)])
         zero = ir.Constant(self.i32, 0)
         return self.builder.gep(field_ptr, [zero, index])
+
+    def ANc_get_member_array_element_ptr(self, obj_ptr, classe, champ, index):
+        idx = self._get_field_index(classe, champ)
+        if idx == -1:
+            return None
+    
+        struct_type = self._get_struct_type(classe)
+        obj_struct = self.builder.bitcast(obj_ptr, struct_type.as_pointer())
+    
+        # Accéder au champ
+        field_ptr = self.builder.gep(obj_struct, [ir.Constant(self.i32, 0), ir.Constant(self.i32, idx)])
+    
+        # Vérifier le type du champ
+        field_type = struct_type.elements[idx]
+        print(f"[DEBUG] _get_member_array_element_ptr: field_type={field_type}")
+    
+        if isinstance(field_type, ir.ArrayType):
+            # Tableau fixe dans la struct : besoin de 2 indices
+            zero = ir.Constant(self.i32, 0)
+            return self.builder.gep(field_ptr, [zero, index])
+        elif isinstance(field_type, ir.PointerType):
+            # Pointeur dans la struct : charger puis 1 seul indice
+            ptr = self.builder.load(field_ptr)
+            return self.builder.gep(ptr, [index])
+        else:
+            print(f"[ERROR] Type de champ non géré: {field_type}")
+            return None
+
+    def _get_member_array_element_ptr(self, obj_ptr, classe, champ, index):
+        idx = self._get_field_index(classe, champ)
+        if idx == -1:
+            return None
+    
+        struct_type = self._get_struct_type(classe)
+        obj_struct = self.builder.bitcast(obj_ptr, struct_type.as_pointer())
+    
+        # Accéder au champ
+        field_ptr = self.builder.gep(obj_struct, [ir.Constant(self.i32, 0), ir.Constant(self.i32, idx)])
+    
+        # Vérifier le type du membre
+        for membre in self.classes[classe]['membres']:
+            if membre['nom'] == champ:
+                if membre.get('is_pointer') or membre.get('has_malloc'):
+                    # Charger le pointeur, puis indexer avec 1 seul indice
+                    ptr = self.builder.load(field_ptr)
+                    return self.builder.gep(ptr, [index])
+                else:
+                    # Tableau fixe : 2 indices
+                    zero = ir.Constant(self.i32, 0)
+                    return self.builder.gep(field_ptr, [zero, index])
+    
+        # Par défaut
+        zero = ir.Constant(self.i32, 0)
+        return self.builder.gep(field_ptr, [zero, index])
+
 
     def visitMemberArrayAccessExpr(self, ctx):
         obj_nom = ctx.objectRef().getText()
@@ -1303,7 +1832,7 @@ class CompilateurLLVM(RmLangVisitor):
         self.builder.store(valeur, elem_ptr)
         return valeur
 
-    def visitArrayAccessExpr(self, ctx):
+    def visitOArrayAccessExpr(self, ctx):
         nom = ctx.ID().getText()
         clean_nom = self._clean_name(nom)
         index = self.visit(ctx.expression())
@@ -1334,7 +1863,48 @@ class CompilateurLLVM(RmLangVisitor):
     
         return ir.Constant(self.i32, 0)
 
-    def visitAffectation_tableau(self, ctx):
+    def visitArrayAccessExpr(self, ctx):
+        nom = ctx.ID().getText()
+        clean_nom = self._clean_name(nom)
+        index = self.visit(ctx.expression())
+    
+        if clean_nom in self.variables:
+            ptr = self.variables[clean_nom]
+        
+            print(f"[DEBUG] visitArrayAccessExpr: nom={nom}, ptr.type={ptr.type}")
+        
+            if isinstance(ptr.type, ir.PointerType):
+                pointee = ptr.type.pointee
+            
+                # Cas 1: Tableau fixe
+                if isinstance(pointee, ir.ArrayType):
+                    elem_ptr = self.builder.gep(ptr, [ir.Constant(self.i32, 0), index])
+                    return self.builder.load(elem_ptr)
+            
+                # Cas 2: Pointeur vers i8 (chaîne)
+                elif isinstance(pointee, ir.IntType) and pointee.width == 8:
+                    char_ptr = self.builder.gep(ptr, [index])
+                    return self.builder.load(char_ptr)
+            
+                # Cas 3: Pointeur vers pointeur (int** venant de int* tab = new int[10])
+                elif isinstance(pointee, ir.PointerType):
+                    # Charger le pointeur du tableau
+                    array_ptr = self.builder.load(ptr)
+                    # Accéder à l'élément
+                    elem_ptr = self.builder.gep(array_ptr, [index])
+                    return self.builder.load(elem_ptr)
+            
+                # Cas 4: Pointeur vers type simple (i32*, i8*)
+                elif isinstance(pointee, ir.IntType):
+                    elem_ptr = self.builder.gep(ptr, [index])
+                    return self.builder.load(elem_ptr)
+            
+                else:
+                    return self.builder.load(ptr)
+    
+        return ir.Constant(self.i32, 0)
+
+    def visitOAffectation_tableau(self, ctx):
         nom = ctx.ID().getText()
         clean_nom = self._clean_name(nom)
         index = self.visit(ctx.expression(0))
@@ -1376,6 +1946,116 @@ class CompilateurLLVM(RmLangVisitor):
                     self.builder.store(valeur, elem_ptr)
 
         return valeur
+
+    def visitAffectation_tableau(self, ctx):
+        nom = ctx.ID().getText()
+        clean_nom = self._clean_name(nom)
+        index = self.visit(ctx.expression(0))
+        valeur = self.visit(ctx.expression(1))
+
+        if clean_nom in self.variables:
+            ptr = self.variables[clean_nom]
+        
+            print(f"[DEBUG] visitAffectation_tableau: nom={nom}, ptr.type={ptr.type}, valeur.type={valeur.type}")
+        
+            if isinstance(ptr.type, ir.PointerType):
+                pointee = ptr.type.pointee
+            
+                # Cas 1: Tableau fixe (ArrayType)
+                if isinstance(pointee, ir.ArrayType):
+                    elem_ptr = self.builder.gep(ptr, [ir.Constant(self.i32, 0), index])
+                    if isinstance(pointee.element, ir.IntType) and pointee.element.width == 8:
+                        if isinstance(valeur.type, ir.IntType) and valeur.type.width == 32:
+                            valeur = self.builder.trunc(valeur, self.i8)
+                    self.builder.store(valeur, elem_ptr)
+                    return valeur
+            
+                # Cas 2: Pointeur vers i8 (chaîne)
+                elif isinstance(pointee, ir.IntType) and pointee.width == 8:
+                    char_ptr = self.builder.gep(ptr, [index])
+                    if isinstance(valeur.type, ir.IntType) and valeur.type.width == 32:
+                        valeur = self.builder.trunc(valeur, self.i8)
+                    self.builder.store(valeur, char_ptr)
+                    return valeur
+            
+                # Cas 3: Pointeur vers pointeur (int** venant de int* tab = new int[10])
+                elif isinstance(pointee, ir.PointerType):
+                    # Charger le pointeur du tableau
+                    array_ptr = self.builder.load(ptr)
+                    # Accéder à l'élément
+                    elem_ptr = self.builder.gep(array_ptr, [index])
+                    # Adapter la valeur si nécessaire
+                    if isinstance(array_ptr.type.pointee, ir.IntType):
+                        if array_ptr.type.pointee.width == 8 and isinstance(valeur.type, ir.IntType) and valeur.type.width == 32:
+                            valeur = self.builder.trunc(valeur, self.i8)
+                    self.builder.store(valeur, elem_ptr)
+                    return valeur
+            
+                # Cas 4: Pointeur vers i32 (tableau d'entiers direct)
+                elif isinstance(pointee, ir.IntType) and pointee.width == 32:
+                    elem_ptr = self.builder.gep(ptr, [index])
+                    self.builder.store(valeur, elem_ptr)
+                    return valeur
+            
+                else:
+                    print(f"[DEBUG] Type pointee non géré: {pointee}")
+                    elem_ptr = self.builder.gep(ptr, [index])
+                    self.builder.store(valeur, elem_ptr)
+                    return valeur
+
+        return valeur
+
+    def visitAncArrayLiteral(self, ctx):
+        """Visite un ArrayLiteral: {1, 2, 3}"""
+        valeurs = []
+    
+        # Parcourir tous les enfants pour trouver les expressions
+        for child in ctx.getChildren():
+            if hasattr(child, 'expression'):
+                try:
+                    val = self.visit(child)
+                    if val is not None:
+                        valeurs.append(val)
+                except:
+                    pass
+            elif hasattr(child, 'getText'):
+                try:
+                    val = self.visit(child)
+                    if val is not None:
+                        valeurs.append(val)
+                except:
+                    pass
+    
+        if valeurs:
+            elem_type = valeurs[0].type
+            nb_elements = len(valeurs)
+        
+            # CHOIX 1: Tableau global constant (comme avant)
+            # array_type = ir.ArrayType(elem_type, len(valeurs))
+            # const_array = ir.Constant(array_type, valeurs)
+            # self._str_count += 1
+            # name = "array_lit_" + str(self._str_count)
+            # var = ir.GlobalVariable(self.module, array_type, name=name)
+            # var.initializer = const_array
+            # var.global_constant = True
+            # return self.builder.bitcast(var, self.void_ptr)
+        
+            # CHOIX 2: Tableau alloué avec malloc (dynamique)
+            #self._declare_malloc()
+        
+            # Allouer le tableau
+            nb_elements_val = ir.Constant(ir.IntType(32), nb_elements)
+            ptr_tableau = self._allouer_tableau_malloc(elem_type, nb_elements_val)
+        
+            # Initialiser chaque élément
+            for i, val in enumerate(valeurs):
+                index = ir.Constant(ir.IntType(32), i)
+                elem_ptr = self.builder.gep(ptr_tableau, [index])
+                self.builder.store(val, elem_ptr)
+        
+            return ptr_tableau
+    
+        return ir.Constant(self.void_ptr, None)
 
     def visitArrayLiteral(self, ctx):
         """Visite un ArrayLiteral: {1, 2, 3}"""
@@ -1545,9 +2225,41 @@ class CompilateurLLVM(RmLangVisitor):
         self.en_scan_classe = False
         self.classe_courante = None
         return None
+
+    def _call_malloc(self, taille_bytes):
+        """
+        Appelle malloc avec la bonne conversion en i64
+        taille_bytes: int ou Value LLVM
+        Retourne i8*
+        """
+        #self._declare_malloc()
+    
+        # Convertir en i64
+        if isinstance(taille_bytes, int):
+            taille_i64 = ir.Constant(ir.IntType(64), taille_bytes)
+        elif hasattr(taille_bytes, 'type'):
+            if taille_bytes.type == ir.IntType(64):
+                taille_i64 = taille_bytes
+            else:
+                # zext vers i64
+                taille_i64 = self.builder.zext(taille_bytes, ir.IntType(64))
+        else:
+            taille_i64 = ir.Constant(ir.IntType(64), int(taille_bytes))
+    
+        # Appeler malloc
+        ptr_i8 = self.builder.call(self.malloc, [taille_i64])
+    
+        # Enregistrer pour libération
+        if not hasattr(self, 'free_all_malloc'):
+            self.free_all_malloc = []
+        self.free_all_malloc.append(ptr_i8)
+    
+        return ptr_i8
     
     def visitConstructeur(self, ctx):
-        nom = ctx.ID().getText()
+        nom_classe = ctx.ID().getText()
+    
+        # Extraire les paramètres
         params = []
         param_names = []
         param_types = []
@@ -1555,18 +2267,52 @@ class CompilateurLLVM(RmLangVisitor):
             for param in ctx.param_list().param():
                 p_type = param.type_().getText()
                 p_name = param.ID().getText()
-                params.append(p_type + " " + p_name)
+                params.append(f"{p_type} {p_name}")
                 param_names.append(p_name)
                 param_types.append(p_type)
-        
-        self.constructeurs[nom] = {
+    
+        # Enregistrer dans tous les cas
+        self.constructeurs[nom_classe] = {
             'params': params,
             'param_names': param_names,
             'param_types': param_types,
             'corps': ctx.bloc()
         }
-        
-        return None
+    
+        # Si on est en scan de classe, s'arrêter là
+        if self.en_scan_classe or self.builder is None:
+            if nom_classe not in self.classes:
+                self.classes[nom_classe] = {'membres': [], 'methodes': {}, 'constructeur': None}
+            self.classes[nom_classe]['constructeur'] = self.constructeurs[nom_classe]
+            return None
+    
+        # === Génération de code ===
+        classe = self.classes.get(nom_classe, {})
+        ptr_this = self.variables.get('this')
+    
+        if ptr_this is None:
+            return None
+    
+        # Allouer les membres avec malloc
+        for membre in classe.get('membres', []):
+            if membre.get('has_malloc'):
+                nom_membre = membre['nom']
+                taille = membre.get('malloc_size', 1)
+            
+                ptr_membre = self._call_malloc(taille)
+                if ptr_membre is None:
+                    continue
+            
+                idx = self._get_field_index(nom_classe, nom_membre)
+                if idx == -1:
+                    continue
+            
+                struct_type = self._get_struct_type(nom_classe)
+                obj_struct = self.builder.bitcast(ptr_this, struct_type.as_pointer())
+                field_ptr = self.builder.gep(obj_struct, [ir.Constant(self.i32, 0), ir.Constant(self.i32, idx)])
+                self.builder.store(ptr_membre, field_ptr)
+    
+        return ptr_this
     
     def visitFonction_membre(self, ctx):
         type_retour = ctx.type_().getText() if ctx.type_() else 'void'
@@ -1608,8 +2354,39 @@ class CompilateurLLVM(RmLangVisitor):
         return self.var_types.get(clean_nom, self.classe_courante)
 
     def visitMethod_call(self, ctx):
+
         obj_nom = ctx.objectRef().getText()
         methode = ctx.ID().getText()
+
+        if methode == 'free':
+            obj_nom = ctx.objectRef().getText()
+            obj_ptr = self._resoudre_objet(obj_nom)
+            classe = self._resoudre_classe(obj_nom)
+        
+            # Libérer les membres alloués avec malloc
+            for membre in classe['membres']:
+                if membre.get('has_malloc'):
+                    nom_membre = membre['nom']
+                    idx = self._get_field_index(classe_name, nom_membre)
+                    struct_type = self._get_struct_type(classe_name)
+                    obj_struct = self.builder.bitcast(obj_ptr, struct_type.as_pointer())
+                    field_ptr = self.builder.gep(obj_struct, [ir.Constant(self.i32, 0), ir.Constant(self.i32, idx)])
+                
+                    # Charger le pointeur
+                    ptr_membre = self.builder.load(field_ptr)
+                
+                    # Appeler free
+                    #self._declare_free()
+                    if ptr_membre.type != self.void_ptr:
+                        ptr_membre = self.builder.bitcast(ptr_membre, self.void_ptr)
+                    self.builder.call(self.free, [ptr_membre])
+        
+            # Libérer l'objet lui-même
+            if obj_ptr.type != self.void_ptr:
+                obj_ptr = self.builder.bitcast(obj_ptr, self.void_ptr)
+            self.builder.call(self.free, [obj_ptr])
+
+        
         args = []
         if ctx.argument_list():
             for expr in ctx.argument_list().expression():
@@ -1694,67 +2471,104 @@ class CompilateurLLVM(RmLangVisitor):
     
         return None
     
-    def visitCondition(self, ctx):
-        """
-        [CORRIGÉ] Gère if/else if/else correctement.
-        """
-        # Récupérer toutes les expressions (conditions) et tous les blocs
+    def visitANC564545Condition(self, ctx):
         expressions = ctx.expression()
         blocs = ctx.bloc()
         nb_conditions = len(expressions)
-    
-        # Vérifier s'il y a un else (plus de blocs que de conditions)
         has_else = ctx.ELSE() is not None
-    
-        # Créer le bloc de fin
+
         end_block = self.builder.append_basic_block("if_end")
-    
+
         for i in range(nb_conditions):
-            # Évaluer la condition
             condition = self.visit(expressions[i])
-            cond = self._to_bool(condition)  # Utilise _to_bool pour gérer tous les types
-        
-            # Créer les blocs
+            cond = self._to_bool(condition)
+
             then_block = self.builder.append_basic_block(f"if_then_{i}")
-        
-            # Déterminer le bloc suivant
+
             if i == nb_conditions - 1:
-                # Dernière condition
                 if has_else:
                     next_block = self.builder.append_basic_block("if_else")
                 else:
                     next_block = end_block
             else:
                 next_block = self.builder.append_basic_block(f"if_next_{i}")
-        
-            # Branchement conditionnel
+
             self.builder.cbranch(cond, then_block, next_block)
-        
-            # Bloc then
+
             self.builder.position_at_start(then_block)
-            self.visit(blocs[i])  # Utilise la liste blocs
+            self.visit(blocs[i])
             if not self.builder.block.is_terminated:
                 self.builder.branch(end_block)
-        
-            # Passer au bloc suivant
+
             self.builder.position_at_start(next_block)
-    
-        # Bloc else (s'il existe)
+
+        # SEULEMENT si un else existe : on est dans le bloc "if_else",
+        # il faut le remplir puis le refermer vers end_block.
         if has_else:
-            # Le dernier bloc est le else
-            else_bloc = blocs[-1]  # Dernier élément de la liste
+            else_bloc = blocs[-1]
             if else_bloc is not None:
                 self.visit(else_bloc)
                 if not self.builder.block.is_terminated:
                     self.builder.branch(end_block)
+
+        # Si pas de else : next_block == end_block, on y est déjà, rien à faire de plus.
+
+        self.builder.position_at_start(end_block)
+        return None
+
+    def visitCondition(self, ctx):
+        expressions = ctx.expression()
+        blocs = ctx.bloc()
+        nb_conditions = len(expressions)
+        has_else = ctx.ELSE() is not None
+
+        # Créer les blocs then
+        then_blocks = [self.builder.append_basic_block(f"if_then_{i}") for i in range(nb_conditions)]
+    
+        # Créer les blocs next (un pour chaque condition sauf la dernière)
+        next_blocks = []
+        for i in range(nb_conditions - 1):
+            next_blocks.append(self.builder.append_basic_block(f"if_next_{i}"))
+    
+        # Créer le bloc de fin
+        end_block = self.builder.append_basic_block("if_end")
+    
+        # Ajouter le bloc de fin ou le bloc else
+        if has_else:
+            else_block = self.builder.append_basic_block("if_else")
+            next_blocks.append(else_block)  # Le dernier next est le else
         else:
-            # S'assurer que le bloc est terminé
+            next_blocks.append(end_block)   # Le dernier next est la fin
+
+        # MAINtenant, next_blocks a la même taille que then_blocks
+        for i in range(nb_conditions):
+            condition = self.visit(expressions[i])
+            cond = self._to_bool(condition)
+        
+            # Branchement conditionnel
+            self.builder.cbranch(cond, then_blocks[i], next_blocks[i])
+
+            # Générer le bloc then
+            self.builder.position_at_start(then_blocks[i])
+            self.visit(blocs[i])
             if not self.builder.block.is_terminated:
                 self.builder.branch(end_block)
-    
+
+            # Passer au bloc suivant
+            self.builder.position_at_start(next_blocks[i])
+
+        # Si on a un else, le générer
+        if has_else:
+            # Le else est déjà dans next_blocks[-1]
+            # On est déjà positionné sur le bloc else
+            else_bloc = blocs[-1]
+            if else_bloc is not None:
+                self.visit(else_bloc)
+                if not self.builder.block.is_terminated:
+                    self.builder.branch(end_block)
+
         # Positionner à la fin
         self.builder.position_at_start(end_block)
-    
         return None
     
     def visitBoucle_while(self, ctx):
@@ -2425,9 +3239,10 @@ class CompilateurLLVM(RmLangVisitor):
         file_handle = self.visit(ctx.expression())
     
         # Allouer avec malloc (survit au retour de fonction)
-        taille = ir.Constant(self.i32, 1024)
+        taille = ir.Constant(self.i64, 1024)
         buffer_ptr = self.builder.call(self.malloc, [taille])
         buffer_cast = self.builder.bitcast(buffer_ptr, self.string_type)
+   
     
         # Appeler fgets
         result = self.builder.call(self.fgets, [buffer_cast, taille, file_handle])
