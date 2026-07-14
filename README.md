@@ -25,3 +25,5 @@ First, copy/paste in Deepseek (Fast Mode), the code you want to understand, and 
 Use more Deepseek because it's unlimited and full power beast. https://chat.deepseek.com/
 
 Claude is token limited and you can't use all the day like Deepseek. https://claude.ai
+
+ChatGPT are also like Claude token limited. https://chatgpt.com/
