@@ -8,7 +8,7 @@
 
 (3.) test.bat isn't the same like testc.bat, it creates the parser and interpret the langage file with test_rm.py(look at the command) OBSOLETE (it's just an example ANTLR)
 
-Look at the wiki for more info.
+Look at the wiki for more info. https://github.com/regismeyssonnier/LangageRM_v2.0/wiki
 
 ## How it works ?
 
