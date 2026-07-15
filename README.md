@@ -27,3 +27,12 @@ Use more Deepseek because it's unlimited and full power beast. https://chat.deep
 Claude is token limited and you can't use all the day like Deepseek. https://claude.ai
 
 ChatGPT are also like Claude token limited. https://chatgpt.com/
+
+## How to improve my langage ?
+
+If there is some fund investissor to put money in my businness, I accept the billions. 
+
+That's not a joke, I think I was born to late all was discovered before my birdthday.
+
+I think I am the greatest and I think i deserve Turing prize, Nobel prize or other decoration for my wall.
+
