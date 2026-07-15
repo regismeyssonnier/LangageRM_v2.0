@@ -18,7 +18,6 @@ array_init
     : '{' expression (',' expression)* '}'
     ;
 
-// Remplacer la règle type actuelle par :
 type
     : type_base ('*')*
     ;
@@ -70,12 +69,13 @@ bloc
 
 instruction
     : declaration
-    | affectation_composee          // DOIT être avant affectation
+    | affectation_composee
     | affectation
     | affectation_membre_tableau
     | affectation_membre
     | affectation_tableau
-    | affectation_pointeur         // *ptr = valeur
+    | affectation_pointeur
+    | affectation_pointeur_membre     // ptr->membre = valeur
     | method_call ';'
     | retour
     | appel_fonction ';'
@@ -87,8 +87,7 @@ instruction
     | 'continue' ';'
     | print_stmt ';'
     | println_stmt ';'
-    | free_stmt ';'                // free(ptr)
-    // Fichiers (instructions)
+    | free_stmt ';'
     | file_open_stmt ';'
     | file_close_stmt ';'
     | file_read_stmt ';'
@@ -125,7 +124,11 @@ affectation_membre_tableau
     ;
 
 affectation_pointeur
-    : '*' expression '=' expression ';'    // *ptr = valeur
+    : '*' expression '=' expression ';'
+    ;
+
+affectation_pointeur_membre
+    : expression '->' ID '=' expression ';'       // ptr->membre = valeur
     ;
 
 // ============================================================
@@ -133,7 +136,7 @@ affectation_pointeur
 // ============================================================
 
 free_stmt
-    : 'free' '(' expression ')'            // free(ptr)
+    : 'free' '(' expression ')'
     ;
 
 // ============================================================
@@ -141,14 +144,9 @@ free_stmt
 // ============================================================
 
 file_mode
-    : 'READ'
-    | 'WRITE'
-    | 'APPEND'
-    | 'READ_BIN'
-    | 'WRITE_BIN'
+    : 'READ' | 'WRITE' | 'APPEND' | 'READ_BIN' | 'WRITE_BIN'
     ;
 
-// Instructions (se terminent par ;)
 file_open_stmt
     : 'file_open' '(' expression ',' file_mode ')'
     ;
@@ -178,7 +176,8 @@ file_write_binary_stmt
 // ============================================================
 
 method_call
-    : objectRef '.' ID '(' argument_list? ')'
+    : objectRef '.' ID '(' argument_list? ')'         // obj.methode()
+    | expression '->' ID '(' argument_list? ')'       // ptr->methode()   <-- NOUVEAU
     ;
 
 retour
@@ -224,11 +223,7 @@ argument_list
     ;
 
 input_type
-    : 'int'
-    | 'double'
-    | 'float'
-    | 'string'
-    | 'bool'
+    : 'int' | 'double' | 'float' | 'string' | 'bool'
     ;
 
 objectRef
@@ -237,19 +232,22 @@ objectRef
     ;
 
 // ============================================================
-// EXPRESSION - TOUT LABELLISÉ
+// EXPRESSION
 // ============================================================
 
 expression
     : objectRef '.' ID '[' expression ']'                 # MemberArrayAccessExpr
     | objectRef '.' ID '(' argument_list? ')'             # MethodCallExpr
     | objectRef '.' ID                                    # MemberAccessExpr
+    | expression '->' ID '(' argument_list? ')'           # PtrMethodCallExpr    // ptr->methode()
+    | expression '->' ID                                  # PtrMemberAccessExpr  // ptr->membre
     | 'input' '(' input_type? ')'                         # InputExpr
+    | ID '[' expression ']' '.' ID '(' argument_list? ')' # ArrayMethodCallExpr
     | ID '[' expression ']'                               # ArrayAccessExpr
     | ID '(' argument_list? ')'                           # CallExpr
     | '(' expression ')'                                  # ParensExpr
-    | 'new' type '[' expression ']'                       # NewArrayExpr        // new int[10]
-    | 'sizeof' '(' type ')'                               # SizeOfExpr          // sizeof(int)
+    | 'new' type '[' expression ']'                       # NewArrayExpr
+    | 'sizeof' '(' type ')'                               # SizeOfExpr
     | INT                                                 # IntLiteral
     | FLOAT                                               # FloatLiteral
     | STRING                                              # StringLiteral
@@ -265,7 +263,6 @@ expression
     | '~' expression                                      # BitwiseNotExpr
     | '-' expression                                      # UnaryMinusExpr
     | '+' expression                                      # UnaryPlusExpr
-    //FICHIERS
     | 'file_open' '(' expression ',' file_mode ')'         # FileOpenExpr
     | 'file_close' '(' expression ')'                      # FileCloseExpr
     | 'file_read' '(' expression ')'                       # FileReadExpr
@@ -273,7 +270,6 @@ expression
     | 'file_write' '(' expression ',' expression ')'       # FileWriteExpr
     | 'file_write_bin' '(' expression ',' expression ')'   # FileWriteBinExpr
     | 'file_eof' '(' expression ')'                        # FileEofExpr
-    // Opérateurs binaires
     | expression '*' expression                           # MulExpr
     | expression '/' expression                           # DivExpr
     | expression '%' expression                           # ModExpr
@@ -300,7 +296,6 @@ expression
 // TOKENS
 // ============================================================
 
-// Mots-clés du langage
 CLASS       : 'class';
 CONSTRUCTOR : 'constructor';
 FUNC        : 'func';
@@ -321,7 +316,6 @@ NEW         : 'new';
 SIZEOF      : 'sizeof';
 FREE        : 'free';
 
-// Types
 CHAR_TYPE   : 'char';
 INT_TYPE    : 'int';
 DOUBLE_TYPE : 'double';
@@ -330,7 +324,6 @@ STRING_TYPE : 'string';
 BOOL_TYPE   : 'bool';
 VOID_TYPE   : 'void';
 
-// Fichiers
 FILE_OPEN      : 'file_open';
 FILE_CLOSE     : 'file_close';
 FILE_READ      : 'file_read';
@@ -344,7 +337,6 @@ APPEND         : 'APPEND';
 READ_BIN       : 'READ_BIN';
 WRITE_BIN      : 'WRITE_BIN';
 
-// Opérateurs composés
 COMPOUND_ASSIGN
     : '+='
     | '-='
@@ -393,5 +385,5 @@ WS
     ;
 
 UNKNOWN
-    : .
+    : . -> skip
     ;

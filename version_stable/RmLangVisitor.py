@@ -119,6 +119,11 @@ class RmLangVisitor(ParseTreeVisitor):
         return self.visitChildren(ctx)
 
 
+    # Visit a parse tree produced by RmLangParser#affectation_pointeur_membre.
+    def visitAffectation_pointeur_membre(self, ctx:RmLangParser.Affectation_pointeur_membreContext):
+        return self.visitChildren(ctx)
+
+
     # Visit a parse tree produced by RmLangParser#free_stmt.
     def visitFree_stmt(self, ctx:RmLangParser.Free_stmtContext):
         return self.visitChildren(ctx)
@@ -249,6 +254,11 @@ class RmLangVisitor(ParseTreeVisitor):
         return self.visitChildren(ctx)
 
 
+    # Visit a parse tree produced by RmLangParser#PtrMemberAccessExpr.
+    def visitPtrMemberAccessExpr(self, ctx:RmLangParser.PtrMemberAccessExprContext):
+        return self.visitChildren(ctx)
+
+
     # Visit a parse tree produced by RmLangParser#LessOrEqualExpr.
     def visitLessOrEqualExpr(self, ctx:RmLangParser.LessOrEqualExprContext):
         return self.visitChildren(ctx)
@@ -306,6 +316,11 @@ class RmLangVisitor(ParseTreeVisitor):
 
     # Visit a parse tree produced by RmLangParser#ArrayLiteral.
     def visitArrayLiteral(self, ctx:RmLangParser.ArrayLiteralContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by RmLangParser#PtrMethodCallExpr.
+    def visitPtrMethodCallExpr(self, ctx:RmLangParser.PtrMethodCallExprContext):
         return self.visitChildren(ctx)
 
 
@@ -386,6 +401,11 @@ class RmLangVisitor(ParseTreeVisitor):
 
     # Visit a parse tree produced by RmLangParser#DerefExpr.
     def visitDerefExpr(self, ctx:RmLangParser.DerefExprContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by RmLangParser#ArrayMethodCallExpr.
+    def visitArrayMethodCallExpr(self, ctx:RmLangParser.ArrayMethodCallExprContext):
         return self.visitChildren(ctx)
 
 
