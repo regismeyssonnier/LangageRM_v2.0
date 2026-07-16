@@ -1,3 +1,18 @@
+class Tab {
+    int age=10;
+    constructor Tab(int a)
+    {
+        this.age = a;
+        println("constructor");
+    }
+
+    func void Display() {
+        //print("A=");
+        println(this.age);
+    }
+
+}
+
 func void main() {
     // Allocation dynamique d'un tableau
     int* tab = new int[10];
@@ -19,6 +34,17 @@ func void main() {
     buffer[1] = 'B';
 
     println(buffer[1]);
+
+    Tab* tab = new Tab[10];
+    for (int i = 0; i < 10; i = i + 1) {
+        tab[i] = Tab(i);
+    }
+
+    for (int i = 0; i < 10; i = i + 1) {
+        print("age=");
+        Tab t = tab[i];
+        t.Display();
+    }
 
     // Libération
     free(tab);

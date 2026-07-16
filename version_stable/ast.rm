@@ -252,7 +252,7 @@ class SuperChaine {
 	}
 
 	func void Split(Sep *osep) {
-		println("split");
+		println("SSplit");
 
 		int count = 0;
 		int index = 0;
@@ -635,7 +635,9 @@ class ASTNode {
         }
         return result * sign;
     }
+
 }
+
 
 class ExprParser {
     string sinput;
@@ -732,6 +734,7 @@ class ExprParser {
     }
 }
 
+
 func void main() {
 
 	Sep osepa = Sep(' ', 10, 10);
@@ -768,25 +771,25 @@ func void main() {
 
     // Creer AST pour: 3 + 4 * 5
     ASTNode root = ASTNode("");
-    root.set_binary("+", null, null);
+    root->set_binary("+", null, null);
 
     ASTNode left = ASTNode("");
-    left.set_number(3);
+    left->set_number(3);
 
     ASTNode right = ASTNode("");
-    right.set_binary("*", null, null);
+    right->set_binary("*", null, null);
 
     ASTNode rl = ASTNode("");
-    rl.set_number(4);
+    rl->set_number(4);
 
     ASTNode rr = ASTNode("");
-    rr.set_number(5);
+    rr->set_number(5);
 
-    right.left = rl;
-    right.right = rr;
+    right->left = rl;
+    right->right = rr;
 
-    root.left = left;
-    root.right = right;
+    root->left = left;
+    root->right = right;
 
     println("AST:");
     root->Print();
@@ -795,7 +798,7 @@ func void main() {
     println(root->Eval());  // 3 + 4*5 = 23
 
     ExprParser parser = ExprParser("3 + 5 * 5 + 2");
-    ASTNode root2 = parser.parse_expr();
+    ASTNode root2 = parser->parse_expr();
         
     println("AST:");
     root2->Print();

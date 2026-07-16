@@ -205,22 +205,40 @@ class CompilateurLLVM(RmLangVisitor):
         var.global_constant = True
         return var
     
-    def _get_llvm_type(self, type_rm):
-        if type_rm == 'int':
-            return self.i32
-        elif type_rm == 'double':
-            return self.double
-        elif type_rm == 'bool':
-            return self.i32
-        elif type_rm == 'string':
+    def _get_llvm_type(self, type_str):
+        if type_str == 'int':
+            return ir.IntType(32)
+        elif type_str == 'char':
+            return ir.IntType(8)
+        elif type_str == 'float':
+            return ir.FloatType()
+        elif type_str == 'double':
+            return ir.DoubleType()
+        elif type_str == 'bool':
+            return ir.IntType(1)
+        elif type_str == 'string':
             return self.string_type
-        elif type_rm == 'char':
-            return self.i8  # i8 = 1 octet
-        #elif type_rm in self.classes:
-        #    return self._get_struct_type(type_rm) 
-        elif type_rm in self.classes:
-            # Les classes sont toujours des pointeurs (malloc)
-            return ir.PointerType(self._get_struct_type(type_rm))
+        elif type_str == 'void':
+            return ir.VoidType()
+        elif type_str == 'int*':
+            return ir.PointerType(ir.IntType(32))
+        elif type_str == 'char*':
+            return ir.PointerType(ir.IntType(8))
+        elif type_str == 'float*':
+            return ir.PointerType(ir.FloatType())
+        elif type_str == 'double*':
+            return ir.PointerType(ir.DoubleType())
+        elif type_str == 'bool*':
+            return ir.PointerType(ir.IntType(1))
+        elif type_str == 'string*':
+            return ir.PointerType(self.string_type)
+        elif type_str.endswith('*'):
+            type_base = type_str.replace('*', '').strip()
+            if type_base in self.classes:
+                return ir.PointerType(self._get_struct_type(type_base))
+            return self.void_ptr
+        elif type_str in self.classes:
+            return ir.PointerType(self._get_struct_type(type_str))
         else:
             return self.void_ptr
     
@@ -304,8 +322,18 @@ class CompilateurLLVM(RmLangVisitor):
             
             return_type = self._get_llvm_type(type_retour) if type_retour != 'void' else self.void
             param_types_llvm = [self.void_ptr]
+
             for p in param_types:
-                param_types_llvm.append(self._get_llvm_type(p))
+                if p in self.classes:
+                    param_types_llvm.append(self.void_ptr)
+                elif p.endswith('*'):
+                    type_base = p.replace('*', '').strip()
+                    if type_base in self.classes:
+                        param_types_llvm.append(self.void_ptr)
+                    else:
+                        param_types_llvm.append(self._get_llvm_type(p))
+                else:
+                    param_types_llvm.append(self._get_llvm_type(p))
             
             func_type = ir.FunctionType(return_type, param_types_llvm)
             func_ptr_type = ir.PointerType(func_type)
@@ -315,7 +343,7 @@ class CompilateurLLVM(RmLangVisitor):
         self.vtable_types[classe] = vtable_type
         return vtable_type
     
-    def _get_struct_type(self, classe):
+    def ooo_get_struct_type(self, classe):
         if classe in self.struct_types:
             print(f"[DEBUG] _get_struct_type: {classe} -> cache hit")
             return self.struct_types[classe]
@@ -329,53 +357,117 @@ class CompilateurLLVM(RmLangVisitor):
         print(f"[DEBUG] _get_struct_type: {classe} -> NEW type created")
         self.struct_types[classe] = struct_type
         return struct_type
+
+    def _get_struct_type(self, classe):
+        if classe in self.struct_types:
+            return self.struct_types[classe]
+    
+        # Marquer comme "en cours" pour éviter la récursion
+        self.struct_types[classe] = None
+    
+        membres = self.classes[classe]['membres']
+        types = [self.void_ptr]
+    
+        for m in membres:
+            m_type = m['type']
+            # Détecter l'auto-référence (ASTNode* dans ASTNode)
+            if m_type == classe + '*' or m_type == classe:
+                types.append(self.void_ptr)  # Utiliser void_ptr temporairement
+            else:
+                elem_type = self._get_llvm_type(m_type)
+                if m.get('is_array'):
+                    types.append(ir.ArrayType(elem_type, m.get('array_size', 1)))
+                else:
+                    types.append(elem_type)
+    
+        struct_type = ir.LiteralStructType(types)
+        self.struct_types[classe] = struct_type
+        return struct_type
     
     def _creer_vtable(self, classe):
         vtable_type = self._get_vtable_type(classe)
         if vtable_type is None:
             return None
-        
+    
         vtable_name = "vtable_" + classe
-        
+    
         if vtable_name in self.vtable_vars:
             return self.vtable_vars[vtable_name]
+    
+        # Anti-récursion : si déjà en train de créer cette vtable
+        if not hasattr(self, '_creating_vtable'):
+            self._creating_vtable = set()
+        if classe in self._creating_vtable:
+            # Créer une vtable temporaire avec juste le class_id
+            if not hasattr(self, '_temp_vtables'):
+                self._temp_vtables = {}
+            if vtable_name in self._temp_vtables:
+                return self._temp_vtables[vtable_name]
         
+            temp_type = ir.LiteralStructType([self.i32])
+            temp_var = ir.GlobalVariable(self.module, temp_type, name=vtable_name + "_tmp")
+            class_id = self._get_class_id(classe)
+            temp_var.initializer = ir.Constant(temp_type, [ir.Constant(self.i32, class_id)])
+            temp_var.global_constant = True
+            self._temp_vtables[vtable_name] = temp_var
+            return temp_var
+    
+        self._creating_vtable.add(classe)
+    
         vtable_var = ir.GlobalVariable(self.module, vtable_type, name=vtable_name)
-        
+    
         methodes = self.classes[classe]['methodes']
         values = []
-        
+    
         class_id = self._get_class_id(classe)
         class_id_const = ir.Constant(self.i32, class_id)
         values.append(class_id_const)
-        
+    
         for nom, info in methodes.items():
             func = self._creer_fonction_methode(classe, nom, info)
             values.append(func)
-        
+    
         vtable_var.initializer = ir.Constant(vtable_type, values)
         vtable_var.global_constant = True
-        
+    
         self.vtable_vars[vtable_name] = vtable_var
+        self._creating_vtable.discard(classe)
+    
         return vtable_var
     
     def _creer_fonction_methode(self, classe, nom, info):
+        if not hasattr(self, '_meth_compile_count'):
+            self._meth_compile_count = 0
+        self._meth_compile_count += 1
+        if self._meth_compile_count > 50:
+            raise Exception("Trop de compilations de méthodes - récursion infinie ?")
+        print(f"[DEBUG] _creer_fonction_methode #{self._meth_compile_count}: {classe}.{nom}")
+
         type_retour = info['type_retour']
         params = info['params']
-        param_names = info['param_names']    # déjà présent dans info, juste pas utilisé
+        param_names = info['param_names']
         param_types = info['param_types']
 
         return_type = self._get_llvm_type(type_retour) if type_retour != 'void' else self.void
         param_types_llvm = [self.void_ptr]
         for p in param_types:
-            param_types_llvm.append(self._get_llvm_type(p))
+            if p in self.classes:
+                param_types_llvm.append(self.void_ptr)  # i8* pour les classes
+            elif p.endswith('*'):
+                type_base = p.replace('*', '').strip()
+                if type_base in self.classes:
+                    param_types_llvm.append(self.void_ptr)  # i8* pour pointeurs de classes
+                else:
+                    param_types_llvm.append(self._get_llvm_type(p))  # int*, char*, etc.
+            else:
+                param_types_llvm.append(self._get_llvm_type(p))
 
         func_type = ir.FunctionType(return_type, param_types_llvm)
         func_name = self._clean_name(classe + "_" + nom)
         func = ir.Function(self.module, func_type, name=func_name)
 
         func.args[0].name = "this"
-        for i, p_name in enumerate(param_names):        # CORRIGÉ : param_names
+        for i, p_name in enumerate(param_names):
             func.args[i + 1].name = self._clean_name(p_name)
 
         entry_block = func.append_basic_block("entry")
@@ -393,14 +485,26 @@ class CompilateurLLVM(RmLangVisitor):
 
         self.var_types['this'] = classe
 
-        for i, p_name in enumerate(param_names):        # CORRIGÉ : param_names
+        for i, p_name in enumerate(param_names):
             clean_name = self._clean_name(p_name)
-            llvm_type = self._get_llvm_type(param_types[i])
+            p_type = param_types[i]
+        
+            # Utiliser le même type que le paramètre de fonction
+            if p_type in self.classes:
+                llvm_type = self.void_ptr
+            elif p_type.endswith('*'):
+                type_base = p_type.replace('*', '').strip()
+                if type_base in self.classes:
+                    llvm_type = self.void_ptr
+                else:
+                    llvm_type = self._get_llvm_type(p_type)
+            else:
+                llvm_type = self._get_llvm_type(p_type)
+        
             ptr = self.builder.alloca(llvm_type, name=clean_name)
             self.builder.store(func.args[i + 1], ptr)
             self.variables[clean_name] = ptr
 
-            p_type = param_types[i]
             if p_type not in ('int', 'double', 'float', 'string', 'bool', 'char', 'void'):
                 self.var_types[clean_name] = p_type
 
@@ -420,7 +524,7 @@ class CompilateurLLVM(RmLangVisitor):
 
         return func
     
-    def _creer_objet(self, classe, args):
+    def ooo_creer_objet(self, classe, args):
         struct_type = self._get_struct_type(classe)
         if struct_type is None:
             return ir.Constant(self.void_ptr, None)
@@ -469,6 +573,7 @@ class CompilateurLLVM(RmLangVisitor):
             else:
                 # Objet ou autre type
                 self.builder.store(ir.Constant(self.void_ptr, None), field_ptr)
+
     
         # NOUVEAU: Enregistrer la classe de l'objet dans var_types
         clean_ptr = "obj_" + str(id(ptr))
@@ -508,6 +613,101 @@ class CompilateurLLVM(RmLangVisitor):
             self.classe_courante = old_classe
     
         return ptr
+
+    def _creer_objet(self, classe, args):
+        struct_type = self._get_struct_type(classe)
+        if struct_type is None:
+            return ir.Constant(self.void_ptr, None)
+
+        vtable_ptr = self._creer_vtable(classe)
+        if vtable_ptr is None:
+            return ir.Constant(self.void_ptr, None)
+
+        td = binding.create_target_data(self.module.data_layout)
+        size = struct_type.get_abi_size(td)
+
+        ptr = self.builder.call(self.malloc, [ir.Constant(self.i64, size)])
+        ptr = self.builder.bitcast(ptr, struct_type.as_pointer())
+        
+        vtable_field = self.builder.gep(ptr, [ir.Constant(self.i32, 0), ir.Constant(self.i32, 0)])
+        vtable_ptr_cast = self.builder.bitcast(vtable_ptr, self.void_ptr)
+        self.builder.store(vtable_ptr_cast, vtable_field)
+
+        for i in range(len(self.classes[classe]['membres'])):
+            field_ptr = self.builder.gep(ptr, [ir.Constant(self.i32, 0), ir.Constant(self.i32, i + 1)])
+            membre = self.classes[classe]['membres'][i]
+            m_type = membre['type']
+
+            if membre.get('is_array'):
+                elem_type = self._get_llvm_type(m_type)
+                for j in range(membre.get('array_size', 1)):
+                    elem_ptr = self.builder.gep(field_ptr, [ir.Constant(self.i32, 0), ir.Constant(self.i32, j)])
+                    if isinstance(elem_type, ir.DoubleType):
+                        zero_val = ir.Constant(self.double, 0.0)
+                    elif isinstance(elem_type, ir.PointerType):
+                        zero_val = ir.Constant(elem_type, None)
+                    else:
+                        zero_val = ir.Constant(elem_type, 0)
+                    self.builder.store(zero_val, elem_ptr)
+                continue
+
+            # Utiliser _get_llvm_type pour avoir le bon type
+            llvm_t = self._get_llvm_type(m_type)
+        
+            if isinstance(llvm_t, ir.PointerType):
+                # Pointeur (int*, char*, string, classe*, etc.)
+                #self.builder.store(ir.Constant(llvm_t, None), field_ptr)
+                field_type = struct_type.elements[i + 1]  # +1 pour vtable
+                null_val = ir.Constant(llvm_t, None)
+                if llvm_t != field_type:
+                    null_val = self.builder.bitcast(null_val, field_type)
+                self.builder.store(null_val, field_ptr)
+
+            elif isinstance(llvm_t, ir.IntType):
+                self.builder.store(ir.Constant(llvm_t, 0), field_ptr)
+            elif isinstance(llvm_t, ir.DoubleType):
+                self.builder.store(ir.Constant(self.double, 0.0), field_ptr)
+            elif isinstance(llvm_t, ir.FloatType):
+                self.builder.store(ir.Constant(ir.FloatType(), 0.0), field_ptr)
+            else:
+                self.builder.store(ir.Constant(self.void_ptr, None), field_ptr)
+
+        clean_ptr = "obj_" + str(id(ptr))
+        self.var_types[clean_ptr] = classe
+
+        if classe in self.constructeurs:
+            old_obj = self.objet_courant
+            old_vars = dict(self.variables)
+            old_var_types = dict(self.var_types)
+            old_classe = self.classe_courante
+    
+            self.objet_courant = ptr
+            self.classe_courante = classe
+            self.var_types['this'] = classe
+    
+            constructeur = self.constructeurs[classe]
+            param_names = constructeur['param_names']
+            param_types = constructeur.get('param_types', [])
+    
+            for i, p_name in enumerate(param_names):
+                if i < len(args):
+                    p_type = param_types[i] if i < len(param_types) else 'int'
+                    llvm_type = self._get_llvm_type(p_type)
+                    clean_name = self._clean_name(p_name)
+                    param_ptr = self.builder.alloca(llvm_type, name=clean_name)
+                    self.builder.store(args[i], param_ptr)
+                    self.variables[clean_name] = param_ptr
+                    if p_type not in ('int', 'double', 'float', 'string', 'bool', 'char', 'void'):
+                        self.var_types[clean_name] = p_type
+    
+            self.visit(constructeur['corps'])
+    
+            self.variables = old_vars
+            self.var_types = old_var_types
+            self.objet_courant = old_obj
+            self.classe_courante = old_classe
+
+        return ptr
     
     def _resoudre_objet(self, nom):
         if nom == 'this':
@@ -543,6 +743,9 @@ class CompilateurLLVM(RmLangVisitor):
         struct_type = self._get_struct_type(classe)
         if struct_type is None:
             return
+
+        print(f"[DEBUG] _store_field: {classe}.{champ} idx={idx}")
+
         obj_struct = self.builder.bitcast(obj_ptr, struct_type.as_pointer())
         field_ptr = self.builder.gep(obj_struct, [ir.Constant(self.i32, 0), ir.Constant(self.i32, idx)])
     
@@ -674,7 +877,16 @@ class CompilateurLLVM(RmLangVisitor):
         for i, arg in enumerate(args_ajustes):
             if i < len(param_types):
                 p_type = param_types[i]
+                print(f"[DEBUG] arg {i}: p_type='{p_type}', arg.type={arg.type}")
+        
+                # Déterminer si c'est un type classe (avec ou sans *)
+                est_classe = p_type in self.classes
                 if '*' in p_type:
+                    type_base = p_type.replace('*', '').strip()
+                    est_classe = type_base in self.classes
+        
+                if '*' in p_type and est_classe:
+                    # Pointeur vers classe (Sep*, ASTNode*)  bitcast vers i8*
                     if isinstance(arg.type, ir.PointerType):
                         arg = self.builder.bitcast(arg, self.void_ptr)
                     elif isinstance(arg.type, (ir.LiteralStructType, ir.IdentifiedStructType)):
@@ -682,6 +894,7 @@ class CompilateurLLVM(RmLangVisitor):
                         self.builder.store(arg, tmp)
                         arg = self.builder.bitcast(tmp, self.void_ptr)
                 elif p_type in self.classes:
+                    # Classe par valeur  charger
                     if isinstance(arg.type, ir.PointerType) and isinstance(arg.type.pointee, (ir.LiteralStructType, ir.IdentifiedStructType)):
                         arg = self.builder.load(arg)
             call_args.append(arg)
@@ -1785,7 +1998,7 @@ class CompilateurLLVM(RmLangVisitor):
         elif type_var == 'float':
             return ir.Constant(ir.FloatType(), 0.0)
         elif type_var == 'bool':
-            return ir.Constant(self.i32, 0)
+            return ir.Constant(ir.IntType(1), 0)  # i1, pas i32
         elif type_var == 'string':
             empty = self._create_string("")
             if self.builder:
@@ -1817,6 +2030,10 @@ class CompilateurLLVM(RmLangVisitor):
         elif type_var == 'char':
             if isinstance(valeur.type, ir.IntType) and valeur.type.width == 32:
                 return self.builder.trunc(valeur, self.i8)
+        elif type_var == 'bool':
+            if isinstance(valeur.type, ir.IntType) and valeur.type.width == 32:
+                # Convertir i32 en i1
+                return self.builder.icmp_signed('!=', valeur, ir.Constant(ir.IntType(32), 0))
 
         return valeur
 
@@ -2040,33 +2257,69 @@ class CompilateurLLVM(RmLangVisitor):
             print(f"[ERROR] Type de champ non géré: {field_type}")
             return None
 
-    def _get_member_array_element_ptr(self, obj_ptr, classe, champ, index):
+    def Lastooo_get_member_array_element_ptr(self, obj_ptr, classe, champ, index):
         idx = self._get_field_index(classe, champ)
         if idx == -1:
             return None
     
         struct_type = self._get_struct_type(classe)
         obj_struct = self.builder.bitcast(obj_ptr, struct_type.as_pointer())
-    
+
+        
         # Accéder au champ
         field_ptr = self.builder.gep(obj_struct, [ir.Constant(self.i32, 0), ir.Constant(self.i32, idx)])
     
         # Vérifier le type du membre
         for membre in self.classes[classe]['membres']:
             if membre['nom'] == champ:
+                field_type = struct_type.elements[idx]
+                print(f"[DEBUG] _get_member_array_element_ptr: champ={champ}, field_type={field_type}, is_pointer={membre.get('is_pointer')}, type={membre.get('type')}")
+
                 if membre.get('is_pointer') or membre.get('has_malloc') or membre.get('type') == 'string':
                     # Charger le pointeur, puis indexer avec 1 seul indice
                     ptr = self.builder.load(field_ptr)
+                    print(f"[DEBUG]   -> pointeur chargé: {ptr.type}, gep avec [{index}]")
                     return self.builder.gep(ptr, [index])
                 else:
                     # Tableau fixe : 2 indices
                     zero = ir.Constant(self.i32, 0)
+                    print(f"[DEBUG]   -> tableau fixe, gep avec [0, {index}]")
                     return self.builder.gep(field_ptr, [zero, index])
     
         # Par défaut
         zero = ir.Constant(self.i32, 0)
         return self.builder.gep(field_ptr, [zero, index])
 
+    def _get_member_array_element_ptr(self, obj_ptr, classe, champ, index):
+        idx = self._get_field_index(classe, champ)
+        if idx == -1:
+            return None
+
+        struct_type = self._get_struct_type(classe)
+        obj_struct = self.builder.bitcast(obj_ptr, struct_type.as_pointer())
+        field_ptr = self.builder.gep(obj_struct, [ir.Constant(self.i32, 0), ir.Constant(self.i32, idx)])
+
+        for membre in self.classes[classe]['membres']:
+            if membre['nom'] == champ:
+                field_type = struct_type.elements[idx]
+                print(f"[DEBUG] _get_member_array_element_ptr: champ={champ}, field_type={field_type}, is_pointer={membre.get('is_pointer')}, type={membre.get('type')}")
+
+
+                if membre.get('is_pointer') or membre.get('has_malloc') or membre.get('type') == 'string':
+                    ptr = self.builder.load(field_ptr)
+                    # Bitcaster vers le bon type avec _get_llvm_type
+                    type_str = membre.get('type', '')
+                    llvm_type = self._get_llvm_type(type_str)
+                    if isinstance(llvm_type, ir.PointerType):
+                        ptr = self.builder.bitcast(ptr, llvm_type)
+                        print(f"[DEBUG]   -> bitcasté vers {llvm_type}")
+                    return self.builder.gep(ptr, [index])
+                else:
+                    zero = ir.Constant(self.i32, 0)
+                    return self.builder.gep(field_ptr, [zero, index])
+
+        zero = ir.Constant(self.i32, 0)
+        return self.builder.gep(field_ptr, [zero, index])
 
     def visitMemberArrayAccessExpr(self, ctx):
         obj_nom = ctx.objectRef().getText()
@@ -2077,6 +2330,8 @@ class CompilateurLLVM(RmLangVisitor):
         if obj_ptr is None or classe is None:
             return ir.Constant(self.i32, 0)
         elem_ptr = self._get_member_array_element_ptr(obj_ptr, classe, champ, index)
+        print(f"[DEBUG] visitMemberArrayAccessExpr: elem_ptr.type={elem_ptr.type}, load={self.builder.load(elem_ptr).type}")
+
         return self.builder.load(elem_ptr) if elem_ptr else ir.Constant(self.i32, 0)
 
     def visitAffectation_membre_tableau(self, ctx):
@@ -2486,7 +2741,7 @@ class CompilateurLLVM(RmLangVisitor):
             self.builder.ret_void()
 
 
-    def ooovisitRetour(self, ctx):
+    def oooovisitRetour(self, ctx):
         """
         [CORRIGÉ - VERSION ROBUSTE] Gère tous les cas de return.
         """
@@ -2553,6 +2808,12 @@ class CompilateurLLVM(RmLangVisitor):
                 if isinstance(valeur.type, ir.PointerType) and isinstance(valeur.type.pointee, ir.ArrayType):
                     zero = ir.Constant(self.i32, 0)
                     valeur = self.builder.gep(valeur, [zero, zero])
+
+                 # CORRECTION BOOL : convertir i32 en i1 si la fonction retourne bool
+                func_type = self.builder.block.function.return_value.type
+                if isinstance(func_type, ir.IntType) and func_type.width == 1:
+                    if isinstance(valeur.type, ir.IntType) and valeur.type.width == 32:
+                        valeur = self.builder.icmp_signed('!=', valeur, ir.Constant(ir.IntType(32), 0))
 
             self.builder.ret(valeur)
         else:
@@ -3126,7 +3387,7 @@ class CompilateurLLVM(RmLangVisitor):
     
     def visitBoolLiteral(self, ctx):
         value = 1 if ctx.getText() == 'true' else 0
-        return ir.Constant(self.i32, value)
+        return ir.Constant(ir.IntType(1), value)  # i1
 
 
     def visitCharLiteral(self, ctx):
@@ -3377,9 +3638,15 @@ class CompilateurLLVM(RmLangVisitor):
     # ============================================================
     def visitPrintln_stmt(self, ctx):
         valeur = self.visit(ctx.expression())
-    
+
         if isinstance(valeur.type, ir.IntType):
-            if valeur.type.width == 8:
+            if valeur.type.width == 1:
+                # Bool (i1)  convertir en i32 pour printf
+                valeur = self.builder.zext(valeur, self.i32)
+                fmt = self._create_string("%d\n")
+                fmt_ptr = self.builder.bitcast(fmt, self.string_type)
+                self.builder.call(self.printf, [fmt_ptr, valeur])
+            elif valeur.type.width == 8:
                 char_val = self.builder.zext(valeur, self.i32)
                 fmt = self._create_string("%c\n")
                 fmt_ptr = self.builder.bitcast(fmt, self.string_type)
@@ -3394,7 +3661,6 @@ class CompilateurLLVM(RmLangVisitor):
             self.builder.call(self.printf, [fmt_ptr, valeur])
         elif isinstance(valeur.type, ir.PointerType):
             if isinstance(valeur.type.pointee, ir.IntType) and valeur.type.pointee.width == 8:
-                # Utiliser printf avec %s au lieu de puts
                 fmt = self._create_string("%s\n")
                 fmt_ptr = self.builder.bitcast(fmt, self.string_type)
                 self.builder.call(self.printf, [fmt_ptr, valeur])
@@ -3405,14 +3671,21 @@ class CompilateurLLVM(RmLangVisitor):
                 self.builder.call(self.printf, [fmt_ptr, addr])
         else:
             self.builder.call(self.puts, [valeur])
-    
+
         return None
+
 
     def visitPrint_stmt(self, ctx):
         valeur = self.visit(ctx.expression())
-    
+
         if isinstance(valeur.type, ir.IntType):
-            if valeur.type.width == 8:
+            if valeur.type.width == 1:
+                # Bool (i1)  convertir en i32 pour printf
+                valeur = self.builder.zext(valeur, self.i32)
+                fmt = self._create_string("%d")
+                fmt_ptr = self.builder.bitcast(fmt, self.string_type)
+                self.builder.call(self.printf, [fmt_ptr, valeur])
+            elif valeur.type.width == 8:
                 char_val = self.builder.zext(valeur, self.i32)
                 fmt = self._create_string("%c")
                 fmt_ptr = self.builder.bitcast(fmt, self.string_type)
@@ -3437,7 +3710,7 @@ class CompilateurLLVM(RmLangVisitor):
                 self.builder.call(self.printf, [fmt_ptr, addr])
         else:
             self.builder.call(self.puts, [valeur])
-    
+
         return None
 
     def visitInput_stmt(self, ctx):

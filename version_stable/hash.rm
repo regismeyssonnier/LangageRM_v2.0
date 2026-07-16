@@ -1,0 +1,117 @@
+class Hash {
+	int* table;
+	int w_table;
+	int h_table;
+	int seed;
+	int max_rand ;
+	int last;
+
+	constructor Hash(int size_tableW, int size_tableH, int seed, int max_rand) {
+		this.table = new int[size_tableW * size_tableH];
+		this.w_table = size_tableW;
+		this.h_table = size_tableH;
+		this.max_rand = max_rand;
+		this.seed = seed;
+		this.last = seed;
+
+		this.Init();
+
+	}
+
+	func void Init() {
+
+		for (int i = 0; i < this.h_table; i =i+ 1) {
+			for (int j = 0; j < this.w_table; j =j+ 1) {
+				this.table[i * this.w_table + j] = this.little_rand();
+			}
+		}
+
+
+	}
+
+	func int getHash(int* tb) {
+		println("Hash");
+		int hsh = 0;
+
+		for (int i = 0; i < this.h_table; i = i + 1) {
+			for (int j = 0; j < this.w_table; j = j + 1) {
+				//println(tb[i * this.w_table + j]);
+				hsh = hsh + tb[i * this.w_table + j] ^ this.table[i * this.w_table + j];
+			
+			}
+		}
+
+		return hsh;
+
+	}
+
+	func int little_rand() {
+		// Xorshift 32 bits
+		int x = this.last;
+		
+		x = x ^ (x << 13);
+		x = x ^ (x >> 17);
+		x = x ^ (x << 5);
+
+		if (x < 0) {
+			x = -x;
+		}
+		else {}
+
+		int result = x - (x / this.max_rand) * this.max_rand;
+
+		this.last = x;
+
+		return result;
+	}
+
+	func void  Display() {
+
+		for (int i = 0; i < this.h_table; i =i+ 1) {
+			for (int j = 0; j < this.w_table; j =j+ 1) {
+				int nb = this.table[i * this.w_table + j];
+				print(nb);
+				print(" ");
+			}println("");
+
+		}println("");
+
+	}
+
+	func void _free_object() {
+		free(this.table);
+	}
+
+}
+
+
+
+func void main() {
+
+	int seed = input(int)
+
+	Hash hash = Hash(5, 2, seed, 50);
+	hash->Display();
+
+	Hash hash2 = Hash(2, 4, seed, 13);
+	hash2->Display();
+
+	int* table = new int[100];
+	for (int i = 0; i < 100; i = i + 1) {
+		table[i] = hash->little_rand();
+		print(table[i]);
+		print(" ");
+	}println("");
+
+	int hs = hash->getHash(table);
+	println(hs);
+
+	for (int i = 0; i < 100; i = i + 1) {
+		print(table[i]);
+		print(" ");
+	}println("");
+
+	hash->_free_object();
+	hash2->_free_object();
+	free(table);
+}
