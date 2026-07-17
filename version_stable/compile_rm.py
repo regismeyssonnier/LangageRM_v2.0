@@ -238,7 +238,8 @@ class CompilateurLLVM(RmLangVisitor):
                 return ir.PointerType(self._get_struct_type(type_base))
             return self.void_ptr
         elif type_str in self.classes:
-            return ir.PointerType(self._get_struct_type(type_str))
+            # Classe sans *  structure (passage par valeur)
+            return self._get_struct_type(type_str)
         else:
             return self.void_ptr
     
@@ -312,20 +313,21 @@ class CompilateurLLVM(RmLangVisitor):
     def _get_vtable_type(self, classe):
         if classe in self.vtable_types:
             return self.vtable_types[classe]
-        
+    
         methodes = self.classes[classe]['methodes']
         types = [self.i32]
-        
+    
         for nom, info in methodes.items():
             type_retour = info['type_retour']
             param_types = info['param_types']
-            
+        
             return_type = self._get_llvm_type(type_retour) if type_retour != 'void' else self.void
             param_types_llvm = [self.void_ptr]
 
             for p in param_types:
                 if p in self.classes:
-                    param_types_llvm.append(self.void_ptr)
+                    # Classe passée par valeur structure
+                    param_types_llvm.append(self._get_struct_type(p))
                 elif p.endswith('*'):
                     type_base = p.replace('*', '').strip()
                     if type_base in self.classes:
@@ -334,11 +336,11 @@ class CompilateurLLVM(RmLangVisitor):
                         param_types_llvm.append(self._get_llvm_type(p))
                 else:
                     param_types_llvm.append(self._get_llvm_type(p))
-            
+        
             func_type = ir.FunctionType(return_type, param_types_llvm)
             func_ptr_type = ir.PointerType(func_type)
             types.append(func_ptr_type)
-        
+    
         vtable_type = ir.LiteralStructType(types)
         self.vtable_types[classe] = vtable_type
         return vtable_type
@@ -452,13 +454,14 @@ class CompilateurLLVM(RmLangVisitor):
         param_types_llvm = [self.void_ptr]
         for p in param_types:
             if p in self.classes:
-                param_types_llvm.append(self.void_ptr)  # i8* pour les classes
+                # Classe passée par valeur  structure
+                param_types_llvm.append(self._get_struct_type(p))
             elif p.endswith('*'):
                 type_base = p.replace('*', '').strip()
                 if type_base in self.classes:
-                    param_types_llvm.append(self.void_ptr)  # i8* pour pointeurs de classes
+                    param_types_llvm.append(self.void_ptr)  # Classe*  i8*
                 else:
-                    param_types_llvm.append(self._get_llvm_type(p))  # int*, char*, etc.
+                    param_types_llvm.append(self._get_llvm_type(p))
             else:
                 param_types_llvm.append(self._get_llvm_type(p))
 
@@ -489,9 +492,9 @@ class CompilateurLLVM(RmLangVisitor):
             clean_name = self._clean_name(p_name)
             p_type = param_types[i]
         
-            # Utiliser le même type que le paramètre de fonction
             if p_type in self.classes:
-                llvm_type = self.void_ptr
+                # Classe passée par valeur  structure
+                llvm_type = self._get_struct_type(p_type)
             elif p_type.endswith('*'):
                 type_base = p_type.replace('*', '').strip()
                 if type_base in self.classes:
@@ -751,8 +754,10 @@ class CompilateurLLVM(RmLangVisitor):
     
         # Bitcaster la valeur vers le type du champ si nécessaire
         field_type = struct_type.elements[idx]
+        print(f"[DEBUG] _store_field: valeur.type={valeur.type} (id={id(valeur.type)}), field_type={field_type} (id={id(field_type)})")
         if isinstance(valeur.type, ir.PointerType) and isinstance(field_type, ir.PointerType):
             if valeur.type != field_type:
+                print(f"[DEBUG]   BITCAST nécessaire")
                 valeur = self.builder.bitcast(valeur, field_type)
     
         self.builder.store(valeur, field_ptr)
@@ -779,9 +784,6 @@ class CompilateurLLVM(RmLangVisitor):
         return self.builder.load(field_ptr)
     
     def _call_method(self, obj_ptr, methode, args):
-        """
-        [CORRIGÉ - VERSION FINALE]
-        """
         # 1. Vérifications
         if obj_ptr is None:
             print("[ERREUR] _call_method: obj_ptr est None")
@@ -803,13 +805,12 @@ class CompilateurLLVM(RmLangVisitor):
 
         print(f"[DEBUG] _call_method: {classe}.{methode}() - attendu={nb_params_attendus}, fourni={len(args)}")
 
-        # 3. Ajuster les arguments utilisateur (sans this)
+        # 3. Ajuster les arguments utilisateur
         args_ajustes = []
         for i in range(nb_params_attendus):
             if i < len(args):
                 args_ajustes.append(args[i])
             else:
-                # Valeur par défaut selon le type
                 if i < len(param_types):
                     p_type = param_types[i]
                     if p_type == 'int':
@@ -817,12 +818,14 @@ class CompilateurLLVM(RmLangVisitor):
                     elif p_type in ('double', 'float'):
                         args_ajustes.append(ir.Constant(self.double, 0.0))
                     elif p_type == 'bool':
-                        args_ajustes.append(ir.Constant(self.i32, 0))
+                        args_ajustes.append(ir.Constant(ir.IntType(1), 0))
                     elif p_type == 'char':
                         args_ajustes.append(ir.Constant(self.i8, 0))
                     elif p_type == 'string':
                         empty = self._create_string("")
                         args_ajustes.append(self.builder.bitcast(empty, self.string_type))
+                    elif p_type in self.classes:
+                        args_ajustes.append(ir.Constant(self._get_struct_type(p_type), None))
                     else:
                         args_ajustes.append(ir.Constant(self.void_ptr, None))
                 else:
@@ -831,24 +834,19 @@ class CompilateurLLVM(RmLangVisitor):
         # 4. Récupérer le struct type et la vtable
         struct_type = self._get_struct_type(classe)
 
-        # Si obj_ptr est une structure par valeur, la mettre sur la pile
         if isinstance(obj_ptr.type, (ir.LiteralStructType, ir.IdentifiedStructType)):
             tmp = self.builder.alloca(obj_ptr.type)
             self.builder.store(obj_ptr, tmp)
             obj_ptr = tmp
-        
-        # Si obj_ptr est déjà un pointeur vers la structure, pas besoin de bitcast
+
         if obj_ptr.type == struct_type.as_pointer():
             obj_struct = obj_ptr
         elif isinstance(obj_ptr.type, ir.PointerType) and obj_ptr.type.pointee == struct_type:
             obj_struct = obj_ptr
         else:
             obj_struct = self.builder.bitcast(obj_ptr, struct_type.as_pointer())
-    
-        vtable_ptr_ptr = self.builder.gep(
-            obj_struct, 
-            [ir.Constant(self.i32, 0), ir.Constant(self.i32, 0)]
-        )
+
+        vtable_ptr_ptr = self.builder.gep(obj_struct, [ir.Constant(self.i32, 0), ir.Constant(self.i32, 0)])
         vtable_ptr = self.builder.load(vtable_ptr_ptr)
 
         # 5. Récupérer le pointeur de fonction
@@ -857,60 +855,44 @@ class CompilateurLLVM(RmLangVisitor):
 
         vtable_type = self._get_vtable_type(classe)
         vtable_struct = self.builder.bitcast(vtable_ptr, vtable_type.as_pointer())
-        func_ptr_ptr = self.builder.gep(
-            vtable_struct,
-            [ir.Constant(self.i32, 0), ir.Constant(self.i32, vtable_index)]
-        )
+        func_ptr_ptr = self.builder.gep(vtable_struct, [ir.Constant(self.i32, 0), ir.Constant(self.i32, vtable_index)])
         func_ptr = self.builder.load(func_ptr_ptr)
 
-        # 6. CORRECTION : call_args = [obj_ptr] + args_ajustes
-        # Le premier argument (this) doit être i8*
-        #this_arg = self.builder.bitcast(obj_ptr, self.void_ptr)
-        #call_args = [this_arg] + args_ajustes
-    
-        #nb_total = 1 + nb_params_attendus
-
-        # 6. call_args = [this_arg] + args_ajustes
+        # 6. Préparer les arguments d'appel
         this_arg = self.builder.bitcast(obj_ptr, self.void_ptr)
         call_args = [this_arg]
-        
+
         for i, arg in enumerate(args_ajustes):
             if i < len(param_types):
                 p_type = param_types[i]
                 print(f"[DEBUG] arg {i}: p_type='{p_type}', arg.type={arg.type}")
-        
-                # Déterminer si c'est un type classe (avec ou sans *)
-                est_classe = p_type in self.classes
-                if '*' in p_type:
-                    type_base = p_type.replace('*', '').strip()
-                    est_classe = type_base in self.classes
-        
-                if '*' in p_type and est_classe:
-                    # Pointeur vers classe (Sep*, ASTNode*)  bitcast vers i8*
-                    if isinstance(arg.type, ir.PointerType):
-                        arg = self.builder.bitcast(arg, self.void_ptr)
-                    elif isinstance(arg.type, (ir.LiteralStructType, ir.IdentifiedStructType)):
-                        tmp = self.builder.alloca(arg.type)
-                        self.builder.store(arg, tmp)
-                        arg = self.builder.bitcast(tmp, self.void_ptr)
-                elif p_type in self.classes:
-                    # Classe par valeur  charger
+
+                if p_type in self.classes:
+                    # Passage par valeur  charger la structure
                     if isinstance(arg.type, ir.PointerType) and isinstance(arg.type.pointee, (ir.LiteralStructType, ir.IdentifiedStructType)):
                         arg = self.builder.load(arg)
+                elif '*' in p_type:
+                    type_base = p_type.replace('*', '').strip()
+                    if type_base in self.classes:
+                        # Pointeur vers classe  bitcast vers i8*
+                        if isinstance(arg.type, ir.PointerType):
+                            arg = self.builder.bitcast(arg, self.void_ptr)
+                        elif isinstance(arg.type, (ir.LiteralStructType, ir.IdentifiedStructType)):
+                            tmp = self.builder.alloca(arg.type)
+                            self.builder.store(arg, tmp)
+                            arg = self.builder.bitcast(tmp, self.void_ptr)
             call_args.append(arg)
-    
+
         nb_total = 1 + nb_params_attendus
-    
+
         print(f"[DEBUG] _call_method: call_args={len(call_args)} (attendu={nb_total})")
         print(f"[DEBUG]   Types: {[str(a.type) for a in call_args]}")
 
-        # 7. Vérification finale
         if len(call_args) != nb_total:
             print(f"[ERREUR FATALE] Nombre d'arguments incorrect: {len(call_args)} vs {nb_total}")
-            print(f"   => Troncature à {nb_total}")
             call_args = call_args[:nb_total]
 
-        # 8. Appel
+        # 7. Appel
         try:
             result = self.builder.call(func_ptr, call_args)
             return result
@@ -1173,6 +1155,27 @@ class CompilateurLLVM(RmLangVisitor):
     
         else:
             raise NotImplementedError(f"Opérateur composé inconnu : {operateur}")
+
+    def visitCompoundAssignExpr(self, ctx):
+        """
+        Gère: i += 1 en tant qu'expression (dans for, etc.)
+        """
+        gauche = self.visit(ctx.expression(0))
+        droite = self.visit(ctx.expression(1))
+        operateur = ctx.COMPOUND_ASSIGN().getText()
+    
+        # Récupérer la variable
+        nom_var = ctx.expression(0).getText()
+        clean_nom = self._clean_name(nom_var)
+        ptr = self.variables.get(clean_nom)
+    
+        if ptr:
+            valeur_actuelle = self.builder.load(ptr)
+            nouvelle = self._appliquer_operation_composee(valeur_actuelle, droite, operateur)
+            self.builder.store(nouvelle, ptr)
+            return nouvelle
+    
+        return droite
     
     # ============================================================
     # FONCTIONS SPÉCIALES POUR MANIPULATIONS DE BITS
@@ -1923,16 +1926,36 @@ class CompilateurLLVM(RmLangVisitor):
             return global_var
 
         llvm_type = self._get_llvm_type(type_var)
-        ptr = self.builder.alloca(llvm_type, name=clean_nom)
-        self.variables[clean_nom] = ptr
-
-        if type_var not in ('int', 'double', 'float', 'string', 'bool', 'void', 'char'):
-            self.var_types[clean_nom] = type_var
 
         if ctx.expression():
             valeur = self.visit(ctx.expression())
 
-            # Si les types sont différents (pointeurs de classes), bitcaster
+            if type_var in self.classes:
+                # Classe : stocker un pointeur vers la structure
+                if isinstance(valeur.type, ir.PointerType) and isinstance(valeur.type.pointee, (ir.LiteralStructType, ir.IdentifiedStructType)):
+                    # valeur est un pointeur vers la structure  stocker le pointeur
+                    ptr = self.builder.alloca(valeur.type, name=clean_nom)
+                    self.builder.store(valeur, ptr)
+                    self.variables[clean_nom] = ptr
+                    if type_var not in ('int', 'double', 'float', 'string', 'bool', 'void', 'char'):
+                        self.var_types[clean_nom] = type_var
+                    return ptr
+                elif isinstance(valeur.type, (ir.LiteralStructType, ir.IdentifiedStructType)):
+                    # valeur est déjà une structure  allouer et stocker
+                    ptr = self.builder.alloca(llvm_type, name=clean_nom)
+                    self.builder.store(valeur, ptr)
+                    self.variables[clean_nom] = ptr
+                    if type_var not in ('int', 'double', 'float', 'string', 'bool', 'void', 'char'):
+                        self.var_types[clean_nom] = type_var
+                    return ptr
+
+            # Pour les types non-classe
+            ptr = self.builder.alloca(llvm_type, name=clean_nom)
+            self.variables[clean_nom] = ptr
+
+            if type_var not in ('int', 'double', 'float', 'string', 'bool', 'void', 'char'):
+                self.var_types[clean_nom] = type_var
+
             if isinstance(valeur.type, ir.PointerType) and isinstance(ptr.type.pointee, ir.PointerType):
                 if valeur.type != ptr.type.pointee:
                     valeur = self.builder.bitcast(valeur, ptr.type.pointee)
@@ -1940,6 +1963,8 @@ class CompilateurLLVM(RmLangVisitor):
             valeur = self._convertir_valeur(valeur, type_var)
             self.builder.store(valeur, ptr)
         else:
+            ptr = self.builder.alloca(llvm_type, name=clean_nom)
+            self.variables[clean_nom] = ptr
             val_defaut = self._get_valeur_defaut(type_var)
             self.builder.store(val_defaut, ptr)
 
@@ -1990,7 +2015,6 @@ class CompilateurLLVM(RmLangVisitor):
 
 
     def _get_valeur_defaut(self, type_var):
-        """Retourne la valeur par défaut pour un type donné"""
         if type_var == 'int':
             return ir.Constant(self.i32, 0)
         elif type_var == 'double':
@@ -1998,7 +2022,7 @@ class CompilateurLLVM(RmLangVisitor):
         elif type_var == 'float':
             return ir.Constant(ir.FloatType(), 0.0)
         elif type_var == 'bool':
-            return ir.Constant(ir.IntType(1), 0)  # i1, pas i32
+            return ir.Constant(ir.IntType(1), 0)
         elif type_var == 'string':
             empty = self._create_string("")
             if self.builder:
@@ -2008,6 +2032,10 @@ class CompilateurLLVM(RmLangVisitor):
                 return empty.gep([zero, zero])
         elif type_var == 'char':
             return ir.Constant(self.i8, 0)
+        elif type_var in self.classes:
+            # Retourner une structure vide (tous les champs à zéro)
+            struct_type = self._get_struct_type(type_var)
+            return ir.Constant(struct_type, None)  # Structure indéfinie
         else:
             return ir.Constant(self.void_ptr, None)
 
@@ -2334,7 +2362,7 @@ class CompilateurLLVM(RmLangVisitor):
 
         return self.builder.load(elem_ptr) if elem_ptr else ir.Constant(self.i32, 0)
 
-    def visitAffectation_membre_tableau(self, ctx):
+    def ooovisitAffectation_membre_tableau(self, ctx):
         obj_nom = ctx.objectRef().getText()
         champ = ctx.ID().getText()
         index = self.visit(ctx.expression(0))
@@ -2349,6 +2377,62 @@ class CompilateurLLVM(RmLangVisitor):
         if isinstance(elem_ptr.type.pointee, ir.IntType) and elem_ptr.type.pointee.width == 8:
             if isinstance(valeur.type, ir.IntType) and valeur.type.width == 32:
                 valeur = self.builder.trunc(valeur, self.i8)
+        self.builder.store(valeur, elem_ptr)
+        return valeur
+
+    def visitAffectation_membre_tableau(self, ctx):
+        obj_nom = ctx.objectRef().getText()
+        champ = ctx.ID().getText()
+        index = self.visit(ctx.expression(0))
+        valeur = self.visit(ctx.expression(1))
+        obj_ptr = self._resoudre_objet(obj_nom)
+        classe = self._resoudre_classe(obj_nom)
+
+        print(f"[DEBUG] visitAffectation_membre_tableau: {obj_nom}.{champ}[{index}] = {valeur}")
+
+        if obj_ptr is None or classe is None:
+            return None
+
+        # Cas tableau d'objets
+        if isinstance(obj_ptr.type, ir.PointerType) and isinstance(obj_ptr.type.pointee, ir.PointerType):
+            array_ptr = self.builder.load(obj_ptr)
+            elem_ptr = self.builder.gep(array_ptr, [index])
+            objet = self.builder.load(elem_ptr)
+        
+            idx = self._get_field_index(classe, champ)
+            if idx == -1:
+                return None
+        
+            struct_type = self._get_struct_type(classe)
+            obj_struct = self.builder.bitcast(objet, struct_type.as_pointer())
+            field_ptr = self.builder.gep(obj_struct, [ir.Constant(self.i32, 0), ir.Constant(self.i32, idx)])
+        
+            field_type = struct_type.elements[idx]
+            if isinstance(field_type, ir.IntType) and field_type.width == 8:
+                if isinstance(valeur.type, ir.IntType) and valeur.type.width == 32:
+                    valeur = self.builder.trunc(valeur, self.i8)
+        
+            self.builder.store(valeur, field_ptr)
+            return valeur
+
+        # Cas normal
+        elem_ptr = self._get_member_array_element_ptr(obj_ptr, classe, champ, index)
+        if elem_ptr is None:
+            return None
+
+        # CORRECTION : si valeur est i8* et elem_ptr attend une structure
+        if isinstance(valeur.type, ir.PointerType) and not isinstance(elem_ptr.type.pointee, ir.PointerType):
+            if isinstance(elem_ptr.type.pointee, (ir.LiteralStructType, ir.IdentifiedStructType)):
+                # Bitcaster vers le bon type de pointeur avant de charger
+                ptr_type = ir.PointerType(elem_ptr.type.pointee)
+                valeur = self.builder.bitcast(valeur, ptr_type)
+                valeur = self.builder.load(valeur)
+                print(f"[DEBUG] Chargement structure pour affectation: {valeur.type}")
+
+        if isinstance(elem_ptr.type.pointee, ir.IntType) and elem_ptr.type.pointee.width == 8:
+            if isinstance(valeur.type, ir.IntType) and valeur.type.width == 32:
+                valeur = self.builder.trunc(valeur, self.i8)
+
         self.builder.store(valeur, elem_ptr)
         return valeur
 
@@ -2490,9 +2574,16 @@ class CompilateurLLVM(RmLangVisitor):
                 # Cas 1: Tableau fixe (ArrayType)
                 if isinstance(pointee, ir.ArrayType):
                     elem_ptr = self.builder.gep(ptr, [ir.Constant(self.i32, 0), index])
+    
+                    # Si l'élément est une structure et valeur est un pointeur  charger
+                    if isinstance(pointee.element, (ir.LiteralStructType, ir.IdentifiedStructType)):
+                        if isinstance(valeur.type, ir.PointerType) and valeur.type.pointee == pointee.element:
+                            valeur = self.builder.load(valeur)
+    
                     if isinstance(pointee.element, ir.IntType) and pointee.element.width == 8:
                         if isinstance(valeur.type, ir.IntType) and valeur.type.width == 32:
                             valeur = self.builder.trunc(valeur, self.i8)
+    
                     self.builder.store(valeur, elem_ptr)
                     return valeur
             
@@ -2809,12 +2900,31 @@ class CompilateurLLVM(RmLangVisitor):
                     zero = ir.Constant(self.i32, 0)
                     valeur = self.builder.gep(valeur, [zero, zero])
 
-                 # CORRECTION BOOL : convertir i32 en i1 si la fonction retourne bool
                 func_type = self.builder.block.function.return_value.type
+        
+                # CORRECTION BOOL : convertir i32 en i1 si la fonction retourne bool
                 if isinstance(func_type, ir.IntType) and func_type.width == 1:
                     if isinstance(valeur.type, ir.IntType) and valeur.type.width == 32:
                         valeur = self.builder.icmp_signed('!=', valeur, ir.Constant(ir.IntType(32), 0))
-
+        
+                # CORRECTION STRUCTURE : charger si la fonction retourne une structure
+                # mais la valeur est un pointeur
+                if isinstance(func_type, (ir.LiteralStructType, ir.IdentifiedStructType)):
+                    if isinstance(valeur.type, ir.PointerType) and valeur.type.pointee == func_type:
+                        valeur = self.builder.load(valeur)
+            
+                # CORRECTION POINTEUR : si la fonction retourne un pointeur
+                # mais la valeur est une structure, allouer sur le tas
+                if isinstance(func_type, ir.PointerType) and isinstance(valeur.type, (ir.LiteralStructType, ir.IdentifiedStructType)):
+                    td = binding.create_target_data(self.module.data_layout)
+                    size = valeur.type.get_abi_size(td)
+                    taille_i64 = ir.Constant(ir.IntType(64), size)
+                    self._declare_malloc()
+                    ptr_i8 = self.builder.call(self.malloc, [taille_i64])
+                    ptr_typed = self.builder.bitcast(ptr_i8, ir.PointerType(valeur.type))
+                    self.builder.store(valeur, ptr_typed)
+                    valeur = self.builder.bitcast(ptr_typed, func_type)
+     
             self.builder.ret(valeur)
         else:
             self.builder.ret_void()

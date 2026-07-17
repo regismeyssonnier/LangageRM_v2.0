@@ -1,0 +1,203 @@
+class ElementHeapQ {
+	int elem;
+    bool is_null;
+	constructor ElementHeapQ(int elem) {
+		this.elem = elem;
+        this.is_null = false;
+	}
+
+	func int CompareSupEq(ElementHeapQ *elemc) {
+		if (this.elem > elemc->GetElem()) {
+			return 1;
+		}
+		else if (this.elem == elemc->GetElem()) {
+			return 0;
+		}
+		else {
+			return -1;
+		}
+	}
+
+	func int GetElem() {
+		return this.elem;
+	}
+
+    func void SetIsNull(bool n) {
+        this.is_null = n;
+    }
+
+    func bool GetIsNull() {
+        if (this.is_null) {
+            return true;
+        }
+        else {
+            return false;
+        }
+    }
+
+}
+
+
+class HeapQ {
+    ElementHeapQ* hq;
+    int size_elem;
+    int last;
+
+    constructor HeapQ(int size) {
+        this.hq = new ElementHeapQ[size];
+        this.size_elem = 0;
+        this.last = 42;
+    }
+
+    // Pour un noeud a l'index i :
+    // Fils gauche : 2*i + 1
+    // Fils droit  : 2*i + 2
+    // Parent      : (i - 1) / 2
+
+    func int left(int i) {
+        return 2 * i + 1;
+    }
+
+    func int right(int i) {
+        return 2 * i + 2;
+    }
+
+    func int parent(int i) {
+        return (i - 1) / 2;
+    }
+
+    func bool hasLeft(int i) {
+        return this.left(i) < this.size_elem;
+    }
+
+
+    func bool hasRight(int i) {
+        return this.right(i) < this.size_elem;
+    }
+
+
+    func void swim(int i) {
+        while (i > 0) {
+            int p = this.parent(i);
+            ElementHeapQ el = this.hq[i];
+            if (el.CompareSupEq(this.hq[p]) > 0) {
+           
+                ElementHeapQ tmp = this.hq[i];
+                this.hq[i] = this.hq[p];
+                this.hq[p] = tmp;
+                i = p;
+            }
+            else {
+                i = 0;  // break
+            }
+        }
+    }
+
+    func void sink(int i) {
+        while (this.hasLeft(i)) {
+            int maxChild = this.left(i);
+            if (this.hasRight(i)) {
+                ElementHeapQ el = this.hq[this.right(i)];
+                if (el.CompareSupEq(this.hq[maxChild]) > 0) {
+                    maxChild = this.right(i);
+                }
+                else {}
+            }
+            else {}
+
+            ElementHeapQ el = this.hq[i];
+            if (el.CompareSupEq(this.hq[maxChild]) < 0) {
+         
+                ElementHeapQ tmp = this.hq[i];
+                this.hq[i] = this.hq[maxChild];
+                this.hq[maxChild] = tmp;
+                i = maxChild;
+            }
+            else {
+                i = this.size_elem;  // break
+            }
+        }
+    }
+
+
+    func void InsertHeapQ(ElementHeapQ elem) {
+        this.hq[this.size_elem] = elem;
+        this.swim(this.size_elem);
+        this.size_elem = this.size_elem + 1;
+    }
+
+    func ElementHeapQ GetMax() {
+        if (this.size_elem == 0) {
+            ElementHeapQ vide = ElementHeapQ(-1);
+            vide.SetIsNull(true);
+            return vide;
+        }
+        else {}
+        ElementHeapQ max = this.hq[0];
+        this.size_elem = this.size_elem - 1;
+        if (this.size_elem > 0) {
+            this.hq[0] = this.hq[this.size_elem];
+            this.sink(0);
+        }
+        else {}
+        return max;
+    }
+
+    func bool IsEmpty() {
+        if (this.size_elem == 0) {
+            return true;
+        }
+        else {
+            return false;
+        }
+    }
+
+    func int little_rand() {
+        // Xorshift 32 bits
+        int x = this.last;
+
+        x = x ^ (x << 13);
+        x = x ^ (x >> 17);
+        x = x ^ (x << 5);
+
+        if (x < 0) {
+            x = -x;
+        }
+        else {}
+
+        int result = x - (x / this.max_rand) * this.max_rand;
+
+        this.last = x;
+
+        return result;
+    }
+}
+
+
+func void main() {
+
+	ElementHeapQ elem = ElementHeapQ(15);
+	ElementHeapQ elem2 = ElementHeapQ(100);
+
+	println(elem->CompareSupEq(elem2));
+
+	HeapQ heapq = HeapQ(100);
+	heapq->InsertHeapQ(elem);
+    heapq->InsertHeapQ(elem2);
+
+    ElementHeapQ elmax[100];
+    for (int i = 0; i < 50; i += 1) {
+        elmax[i] = ElementHeapQ(heapq->little_rand() % 1000);
+        heapq->InsertHeapQ(elmax[i]);
+    }
+    
+    while (!heapq->IsEmpty()) {
+        ElementHeapQ elx = heapq->GetMax();
+        print(elx->GetElem());
+        print(" ");
+
+    }
+    println(" ");
+	
+
+}
