@@ -717,8 +717,7 @@ class CompilateurLLVM(RmLangVisitor):
             return self.objet_courant
         clean_nom = self._clean_name(nom)
         if clean_nom in self.variables:
-            ptr = self.variables[clean_nom]
-            return self.builder.load(ptr)
+            return self.variables[clean_nom]  # Retourne le pointeur, pas de load
         return None
     
     def _get_field_index(self, classe, champ):
@@ -3162,7 +3161,18 @@ class CompilateurLLVM(RmLangVisitor):
         if obj_ptr is None:
             return None
 
-        if isinstance(obj_ptr.type, (ir.LiteralStructType, ir.IdentifiedStructType)):
+        # Si obj_ptr est i8* (this)  le garder comme pointeur
+        # Si c'est un pointeur vers structure  garder le pointeur
+        # Si c'est une structure par valeur  allouer
+        if isinstance(obj_ptr.type, ir.PointerType):
+            pointee = obj_ptr.type.pointee
+            if isinstance(pointee, (ir.LiteralStructType, ir.IdentifiedStructType)):
+                pass  # Pointeur vers structure  garder
+            elif pointee == ir.IntType(8):  # i8* = this
+                pass  # Garder i8* tel quel
+            else:
+                obj_ptr = self.builder.load(obj_ptr)
+        elif isinstance(obj_ptr.type, (ir.LiteralStructType, ir.IdentifiedStructType)):
             tmp = self.builder.alloca(obj_ptr.type)
             self.builder.store(obj_ptr, tmp)
             obj_ptr = tmp
@@ -3283,10 +3293,20 @@ class CompilateurLLVM(RmLangVisitor):
 
         if clean_nom in self.fonctions:
             func = self.fonctions[clean_nom]
-            # Charger les structures si nécessaire
+        
+            # Adapter les arguments selon les types attendus
             for i, arg in enumerate(args):
-                if isinstance(arg.type, ir.PointerType) and isinstance(arg.type.pointee, (ir.LiteralStructType, ir.IdentifiedStructType)):
-                    args[i] = self.builder.load(arg)
+                if i < len(func.args):
+                    param_type = func.args[i].type
+                    if isinstance(param_type, ir.PointerType) and isinstance(arg.type, (ir.LiteralStructType, ir.IdentifiedStructType)):
+                        # Fonction attend un pointeur, mais on a une structure  alloca + adresse
+                        tmp = self.builder.alloca(arg.type)
+                        self.builder.store(arg, tmp)
+                        args[i] = self.builder.bitcast(tmp, param_type)
+                    elif isinstance(param_type, (ir.LiteralStructType, ir.IdentifiedStructType)) and isinstance(arg.type, ir.PointerType):
+                        # Fonction attend une structure, mais on a un pointeur  charger
+                        args[i] = self.builder.load(arg)
+        
             return self.builder.call(func, args)
 
         if nom in self.classes:
@@ -3514,28 +3534,28 @@ class CompilateurLLVM(RmLangVisitor):
         nom = ctx.ID().getText()
         clean_nom = self._clean_name(nom)
         ptr = self.variables.get(clean_nom)
-    
+
         if ptr:
             # Si c'est un tableau de char, retourner un pointeur vers le premier élément
             if isinstance(ptr.type.pointee, ir.ArrayType):
-                # Vérifier si c'est un tableau de char
                 if isinstance(ptr.type.pointee.element, ir.IntType) and ptr.type.pointee.element.width == 8:
-                    # Retourner un pointeur vers le premier élément (i8*)
                     zero = ir.Constant(self.i32, 0)
                     return self.builder.gep(ptr, [zero, zero])
                 else:
-                    # Autre tableau, retourner le pointeur
                     return ptr
-            # Si c'est un pointeur vers un tableau, charger le pointeur
+            # Si c'est un pointeur vers un tableau
             elif isinstance(ptr.type, ir.PointerType) and isinstance(ptr.type.pointee, ir.ArrayType):
                 return ptr
+            # Si c'est un pointeur vers une structure  charger la structure
+            elif isinstance(ptr.type, ir.PointerType) and isinstance(ptr.type.pointee, (ir.LiteralStructType, ir.IdentifiedStructType)):
+                return self.builder.load(ptr)
             # Si c'est un double pointeur (i8**), charger le pointeur
             elif isinstance(ptr.type, ir.PointerType) and isinstance(ptr.type.pointee, ir.PointerType):
                 return self.builder.load(ptr)
             # Sinon, charger la valeur
             else:
                 return self.builder.load(ptr)
-    
+
         return ir.Constant(self.i32, 0)
 
     def visitUnaryMinusExpr(self, ctx):

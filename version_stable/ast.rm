@@ -576,12 +576,12 @@ class ASTNode {
     func int Eval() {
         StringUtil su = StringUtil();
 
-        if (su.streq(this.type, "number")) {
+        if (su->streq(this.type, "number")) {
             return this.str_to_int(this.value);
         }
         else {}
 
-        if (su.streq(this.type, "binary")) {
+        if (su->streq(this.type, "binary")) {
             int l = 0;
             int r = 0;
             if (this.left != null) {
@@ -594,22 +594,22 @@ class ASTNode {
             }
             else {}
 
-            if (su.streq(this.value , "+")) {
+            if (su->streq(this.value , "+")) {
                 return l + r;
             }
             else {}
 
-            if (su.streq(this.value, "-")) {
+            if (su->streq(this.value, "-")) {
                 return l - r;
             }
             else {}
 
-            if (su.streq(this.value, "*")) {
+            if (su->streq(this.value, "*")) {
                 return l * r;
             }
             else {}
 
-            if (su.streq(this.value, "/")) {
+            if (su->streq(this.value, "/")) {
                 return l / r;
             }
             else {}
@@ -742,25 +742,25 @@ func void main() {
 	SuperChaine super = SuperChaine("z = a + b");
 	super.Split(osepa);
 	print("sep=");
-	char s = osepa.Get(0, 0);
+	char s = osepa->Get(0, 0);
 	println(s);
 	int a = 10;
 	Split(a);
 
-	osepa._free();
+	osepa->_free();
 
     Regex r = Regex("ou");
 
-    bool m = r.Match("coucou");
+    bool m = r->Match("coucou");
     println(m);
 
-    string s = r.Replace("coucou", "XX");
+    string s = r->Replace("coucou", "XX");
     println(s);  // "cXXcou"
 
-    string s2 = r.ReplaceAll("coucou vous", "XX");
+    string s2 = r->ReplaceAll("coucou vous", "XX");
     println(s2);  // "cXXcXX vXXs"
 
-    int c = r.Count("coucou vous trouvez tout");
+    int c = r->Count("coucou vous trouvez tout");
     println(c);  // 5
     
     int a = 10;

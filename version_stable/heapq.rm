@@ -42,11 +42,13 @@ class HeapQ {
     ElementHeapQ* hq;
     int size_elem;
     int last;
+    int max_rand;
 
     constructor HeapQ(int size) {
         this.hq = new ElementHeapQ[size];
         this.size_elem = 0;
         this.last = 42;
+        this.max_rand = 1000;
     }
 
     // Pour un noeud a l'index i :
@@ -173,6 +175,35 @@ class HeapQ {
     }
 }
 
+class Ctest {
+    int age;
+    constructor Ctest(int a) {
+        this.age = a;
+    }
+
+    func void Display() {
+        println(this.age);
+    }
+
+    func void SetAge(int a) {
+        println("SetAge:");
+        println(a);
+        this.age = a;
+        println(this.age);
+    }
+
+    func int GetAge() {
+        return this.age;
+    }
+}
+
+func void test(Ctest *c) {
+    println("test avant:");
+    c->Display();
+    c->SetAge(100);
+    println("test apres:");
+    c->Display();
+}
 
 func void main() {
 
@@ -198,6 +229,11 @@ func void main() {
 
     }
     println(" ");
+
+    Ctest c = Ctest(5);
+    c.Display();
+    test(c);
+    c.Display();
 	
 
 }

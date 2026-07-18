@@ -1,0 +1,303 @@
+class Array {
+    int* buffer;
+    int size_elem;
+    int last;
+    int max_rand;
+
+    constructor Array(int size) {
+        this.buffer = new int[size];
+        this.size_elem = 0;
+        this.last = 42;
+        this.max_rand = 1000000;
+    }
+
+    // ============================================================
+    // GETTERS
+    // ============================================================
+
+    func int GetSize() {
+        return this.size_elem;
+    }
+
+    func int GetElem(int index) {
+        return this.buffer[index];
+    }
+
+    func int* GetBuffer() {
+        return this.buffer;
+    }
+
+    func int GetLast() {
+        return this.last;
+    }
+
+    func int GetMaxRand() {
+        return this.max_rand;
+    }
+
+    // ============================================================
+    // SETTERS
+    // ============================================================
+
+    func void SetSize(int s) {
+        this.size_elem = s;
+    }
+
+    func void SetElem(int index, int val) {
+        this.buffer[index] = val;
+    }
+
+    func void SetLast(int l) {
+        this.last = l;
+    }
+
+    func void SetMaxRand(int m) {
+        this.max_rand = m;
+    }
+
+    // ============================================================
+    // METHODES
+    // ============================================================
+
+    func void IncrementSize() {
+        this.size_elem = this.size_elem + 1;
+    }
+
+    func void DecrementSize() {
+        this.size_elem = this.size_elem - 1;
+    }
+
+    func int CompareSup(int idx1, int idx2) {
+        if (this.GetElem(idx1) > this.GetElem(idx2)) {
+            return 1;
+        }
+        else if (this.GetElem(idx1) == this.GetElem(idx2)) {
+            return 0;
+        }
+        else {
+            return -1;
+        }
+    }
+
+    func void Swap(int idx1, int idx2) {
+        int tmp = this.GetElem(idx1);
+        this.SetElem(idx1, this.GetElem(idx2));
+        this.SetElem(idx2, tmp);
+    }
+
+    func int little_rand() {
+        int x = this.GetLast();
+        x = x ^ (x << 13);
+        x = x ^ (x >> 17);
+        x = x ^ (x << 5);
+        if (x < 0) {
+            x = -x;
+        }
+        else {
+
+        }
+        int result = x - (x / this.GetMaxRand()) * this.GetMaxRand();
+        this.SetLast(x);
+        return result;
+    }
+
+    func void FillRandom(int n) {
+        this.size_elem = 0;
+        for (int i = 0; i < n; i += 1) {
+            this.SetElem(i, this.little_rand() % 1000);
+            this.IncrementSize();
+        }
+    }
+
+    func void Print() {
+        for (int i = 0; i < this.GetSize(); i += 1) {
+            print(this.GetElem(i));
+            print(" ");
+        }
+        println("");
+    }
+}
+
+class Sort {
+    Array* _array;
+
+    constructor Sort(Array* arr) {
+        this._array = arr;
+    }
+
+    // ============================================================
+    // GETTER
+    // ============================================================
+
+    func Array* GetArray() {
+        return this._array;
+    }
+
+    // ============================================================
+    // QUICKSORT
+    // ============================================================
+
+    func int Partition(int low, int high) {
+        Array* a = this.GetArray();
+        int pivot = a->GetElem(high);
+        int i = low - 1;
+
+        for (int j = low; j < high; j += 1) {
+            if (a->GetElem(j) <= pivot) {
+                i = i + 1;
+                a->Swap(i, j);
+            }
+            else {
+
+            }
+        }
+        a->Swap(i + 1, high);
+        return i + 1;
+    }
+
+    func void QuickSort(int low, int high) {
+        if (low < high) {
+            int pi = this.Partition(low, high);
+            this.QuickSort(low, pi - 1);
+            this.QuickSort(pi + 1, high);
+        }
+        else {
+
+        }
+    }
+
+    // ============================================================
+    // MERGESORT
+    // ============================================================
+
+    func void Merge(int left, int mid, int right) {
+        int n1 = (mid - left) + 1;
+        int n2 = right - mid;
+
+        int* L = new int[n1];
+        int* R = new int[n2];
+        Array* a = this.GetArray();
+
+          for (int i = 0; i < n1; i += 1) {
+            L[i] = a->GetElem(left + i);
+        }
+        for (int j = 0; j < n2; j += 1) {
+            R[j] = a->GetElem(mid + 1 + j);
+        }
+
+        int i = 0;
+        int j = 0;
+        int k = left;
+
+        while (i < n1 && j < n2) {
+            if (L[i] <= R[j]) {
+                a->SetElem(k, L[i]);
+                i = i + 1;
+            }
+            else {
+                a->SetElem(k, R[j]);
+                j = j + 1;
+            }
+            k = k + 1;
+        }
+
+        while (i < n1) {
+            a->SetElem(k, L[i]);
+            i = i + 1;
+            k = k + 1;
+        }
+
+        while (j < n2) {
+            a->SetElem(k, R[j]);
+            j = j + 1;
+            k = k + 1;
+        }
+
+        free(L);
+        free(R);
+    }
+
+    func void MergeSort(int left, int right) {
+        
+        if (left < right) {
+            int mid = left + (right - left) / 2;
+            this.MergeSort(left, mid);
+            this.MergeSort(mid + 1, right);
+            this.Merge(left, mid, right);
+        }
+        else {
+
+        }
+    }
+
+    // ============================================================
+    // INSERTION SORT
+    // ============================================================
+
+    func void InsertionSort() {
+        Array* a = this.GetArray();
+        int n = a->GetSize();
+        for (int i = 1; i < n; i += 1) {
+            int key = a->GetElem(i);
+            int j = i - 1;
+            while (j >= 0 && a->GetElem(j) > key) {
+                a->SetElem(j + 1, a->GetElem(j));
+                j = j - 1;
+            }
+            a->SetElem(j + 1, key);
+        }
+    }
+
+    // ============================================================
+    // VERIFICATION
+    // ============================================================
+
+    func bool IsSorted() {
+        Array* a = this.GetArray();
+        int n = a->GetSize();
+        for (int i = 1; i < n; i += 1) {
+            if (a->GetElem(i - 1) > a->GetElem(i)) {
+                return false;
+            }
+            else{}
+        }
+        return true;
+    }
+}
+
+func void main() {
+    Array tarray = Array(100);
+    tarray->FillRandom(20);
+
+    println("Tableau original:");
+    tarray->Print();
+
+    Sort sorter = Sort(tarray);
+
+    println("QuickSort:");
+    sorter->QuickSort(0, tarray->GetSize() - 1);
+    tarray->Print();
+    println(sorter->IsSorted());
+
+    // Re-remplir avec de nouvelles valeurs
+    tarray->FillRandom(20);
+
+    println("Tableau original:");
+    tarray->Print();
+
+    println("MergeSort:");
+    sorter->MergeSort(0, tarray->GetSize() - 1);
+    tarray->Print();
+    println(sorter->IsSorted());
+
+    // Re-remplir
+    tarray->FillRandom(20);
+
+    println("Tableau original:");
+    tarray->Print();
+
+    println("InsertionSort:");
+    sorter->InsertionSort();
+    tarray->Print();
+    println(sorter->IsSorted());
+}

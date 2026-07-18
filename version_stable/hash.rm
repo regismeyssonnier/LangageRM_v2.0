@@ -88,7 +88,7 @@ class Hash {
 
 func void main() {
 
-	int seed = input(int)
+	int seed = input(int);
 
 	Hash hash = Hash(5, 2, seed, 50);
 	hash->Display();
@@ -106,7 +106,7 @@ func void main() {
 	int hs = hash->getHash(table);
 	println(hs);
 
-	for (int i = 0; i < 100; i = i + 1) {
+	for (int i = 0; i < 100; i += 1) {
 		print(table[i]);
 		print(" ");
 	}println("");
@@ -114,4 +114,10 @@ func void main() {
 	hash->_free_object();
 	hash2->_free_object();
 	free(table);
+
+	int x = 10;
+	x += 100;
+	print("x=");
+	println(x);
+
 }

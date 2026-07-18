@@ -457,7 +457,7 @@ class BMPLoader {
         int totalBits = (ln + 1) * 8;
         int totalPixels = this.width * this.height;
         int totalChannels = totalPixels * 3; // R, G, B channels
-
+        println(this.width);
         // 1. Capacity check
         if (totalBits > totalChannels) {
             println("ERROR: The message is too long for this image!");
@@ -843,29 +843,29 @@ func void main() {
     BMPLoader loaderSteg = BMPLoader();
     string fileHandle = file_open("img.bmp", READ_BIN);
     // 1. Load the original image
-    loaderSteg.loadPixelDataS(fileHandle);
+    loaderSteg->loadPixelDataS(fileHandle);
 
 
     // 2. Hide your secret message
-    loaderSteg.Stegano("regis casseur danusregis casseur danusregis casseur ain't no sunshine");
+    loaderSteg->Stegano("regis casseur danusregis casseur danusregis casseur ain't no sunshine");
     file_close(fileHandle);
 
     string fileHandlew = file_open("hidden_message.bmp", WRITE_BIN);
     // 3. Save the modified image to a new file
-    loaderSteg.savePixelData(fileHandlew);
+    loaderSteg->savePixelData(fileHandlew);
     file_close(fileHandlew);
-    loaderSteg._freeObject();
+    loaderSteg->_freeObject();
 
     BMPLoader loaderStegd = BMPLoader();
     string fileHandlewd = file_open("hidden_message.bmp", READ_BIN);
     // 4. Later, to verify the extraction:
-    loaderStegd.loadPixelDataS(fileHandlewd);
+    loaderStegd->loadPixelDataS(fileHandlewd);
     
-    string secret = loaderStegd.ExtractMessage();
+    string secret = loaderStegd->ExtractMessage();
     println(secret); // Outputs: "This is my hidden text!"
     
     file_close(fileHandlewd);
-    loaderStegd._freeObject();
+    loaderStegd->_freeObject();
     
 
 }
