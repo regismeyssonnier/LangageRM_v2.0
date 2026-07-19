@@ -1,0 +1,1029 @@
+class Random {
+	int last;
+	int max_rand;
+	int seed;
+	constructor Random(int seed, int max_rand) {
+		this.seed = seed;
+		this.last = seed;
+		this.max_rand = max_rand;
+
+	}
+
+	func int little_rand() {
+		// Xorshift 32 bits
+		int x = this.last;
+
+		x = x ^ (x << 13);
+		x = x ^ (x >> 17);
+		x = x ^ (x << 5);
+
+		if (x < 0) {
+			x = -x;
+		}
+		 
+
+		int result = x - (x / this.max_rand) * this.max_rand;
+
+		this.last = x;
+
+		return result;
+	}
+
+}
+
+class Clause {
+	int a;
+	int b;
+	int c;
+	int sa;
+	int sb;
+	int sc;
+	
+	constructor Clause(int a, int b, int c, int sa, int sb, int sc) {
+		this.a = a;
+		this.b = b;
+		this.c = c;
+
+		this.sa = sa;
+		this.sb = sb;
+		this.sc = sc;
+		
+	}
+
+	func int getA() {
+		return this.a;
+	}
+
+	func int getB() {
+		return this.b;
+	}
+
+	func int getC() {
+		return this.c;
+	}
+
+	func void setA(int a) {
+		this.a = a;
+	}
+
+	func void setB(int b) {
+		this.b = b;
+	}
+
+	func void setC(int c) {
+		this.c = c;
+	}
+
+	func int getSA() {
+		return this.sa;
+	}
+
+	func int getSB() {
+		return this.sb;
+	}
+
+	func int getSC() {
+		return this.sc;
+	}
+
+	func void setSA(int sa) {
+		this.sa = sa;
+	}
+
+	func void setSB(int sSb) {
+		this.sb = sb;
+	}
+
+	func void setSC(int sc) {
+		this.sc = sc;
+	}
+
+	
+
+
+	func void Display() {
+		print("(");
+		print(this.a);
+		print(",");
+		print(this.b);
+		print(",");
+		print(this.c);
+		println(")");
+	}
+
+}
+
+
+
+class _3SAT_Solver {
+
+	Clause* clause;
+	int size;
+	int size_var;
+	int* solver;
+	int num_solver;
+	int satisfy = 0;
+	int* var;
+
+	// etats possibles
+	int _UNASSIGNED;
+	int _FALSE;
+	int _TRUE;
+
+	int* assignment;    // Tableau de taille nb_var
+						// -1 = non assigne, 0 = FAUX, 1 = VRAI
+
+	constructor _3SAT_Solver(int size, int *var, int nb_var) {
+		this.clause = new Clause[size];
+		this.size = size;
+		this.size_var = nb_var;
+		this.solver = new int[nb_var];
+		this.num_solver = 0;
+		this.var = var;
+		this.assignment = new int[nb_var];
+
+		this._UNASSIGNED = -1;
+		this._FALSE = 0;
+		this._TRUE = 1;
+	}
+
+	func void AddClause(int index, Clause clause) {
+		this.clause[index] = clause;
+	
+	}
+
+	func int IsSatisfy(int size) {
+		int res = -1;
+		
+		for (int i = 0; i < size; i += 1) {
+			Clause cl = this.clause[i];
+			int tmp = 0;
+			if (cl->getSA() == 1) {
+				tmp = this.solver[cl->getA()];
+			}
+			else {
+				tmp = 1 - this.solver[cl->getA()];
+			}
+
+			if (cl->getSB() == 1) {
+				tmp = tmp | this.solver[cl->getB()];
+			}
+			else {
+				tmp = tmp | (1 - this.solver[cl->getB()]);
+			}
+
+			if (cl->getSC() == 1) {
+				tmp = tmp | this.solver[cl->getC()];
+			}
+			else {
+				tmp = tmp | (1 - this.solver[cl->getC()]);
+			}
+
+			if (res == -1) { 
+				res = tmp;
+			}
+			else {
+				res = res & tmp;
+			}
+		}
+
+
+		return res;
+	}
+
+	func int IsSatisfyA(int size) {
+		int res = -1;
+
+		for (int i = 0; i < size; i += 1) {
+			Clause cl = this.clause[i];
+			int tmp = 0;
+
+			if (cl->getSA() == 1) {
+				tmp = this.assignment[cl->getA()];
+			}
+			else {
+				tmp = 1 - this.assignment[cl->getA()];
+			}
+
+			if (cl->getSB() == 1) {
+				tmp = tmp | this.assignment[cl->getB()];
+			}
+			else {
+				tmp = tmp | (1 - this.assignment[cl->getB()]);
+			}
+
+			if (cl->getSC() == 1) {
+				tmp = tmp | this.assignment[cl->getC()];
+			}
+			else {
+				tmp = tmp | (1 - this.assignment[cl->getC()]);
+			}
+
+			if (res == -1) {
+				res = tmp;
+			}
+			else {
+				res = res & tmp;
+			}
+		}
+
+		if (res == -1) {
+			return 1;
+		}
+		 
+		return res;
+	}
+
+	func int propager() {
+		int changed = 1;
+		int conflit = 0;
+
+		while ((changed == 1) && (conflit == 0)) {
+			changed = 0;
+
+			for (int i = 0; i < this.size; i += 1) {
+				Clause c = this.clause[i];
+
+				// Recuperer les 3 litteraux
+				int vars[3];
+				int signs[3];
+				vars[0] = c->getA();
+				signs[0] = c->getSA();
+				vars[1] = c->getB();
+				signs[1] = c->getSB();
+				vars[2] = c->getC();
+				signs[2] = c->getSC();
+
+				// Etat de la clause
+				int nb_undef = 0;
+				int undef_var = -1;
+				int undef_sign = 0;
+				int nb_faux = 0;
+				int nb_vrai = 0;
+
+				// Variables deja traitees (pour eviter les doublons)
+				int deja_traitees[3];
+				deja_traitees[0] = -1;
+				deja_traitees[1] = -1;
+				deja_traitees[2] = -1;
+				int nb_traitees = 0;
+
+				// Parcourir les 3 litteraux
+				int j = 0;
+				while (j < 3) {
+					int var = vars[j];
+					int sign = signs[j];
+
+					// Verifier si cette variable a deja ete traitee
+					int deja_vue = 0;
+					int k = 0;
+					while (k < nb_traitees) {
+						if (deja_traitees[k] == var) {
+							deja_vue = 1;
+							k = nb_traitees;  // sortir de la boucle
+						}
+						 
+						k = k + 1;
+					}
+
+					// Si deja vue, on passe au litteral suivant
+					if (deja_vue == 0) {
+						// Marquer cette variable comme traitee
+						deja_traitees[nb_traitees] = var;
+						nb_traitees = nb_traitees + 1;
+
+						// Analyser la variable
+						if (this.assignment[var] == this._UNASSIGNED) {
+							nb_undef = nb_undef + 1;
+							undef_var = var;
+							undef_sign = sign;
+						}
+						else {
+							if (this.assignment[var] == sign) {
+								nb_vrai = nb_vrai + 1;
+							}
+							else {
+								nb_faux = nb_faux + 1;
+							}
+						}
+					}
+					 
+
+					j = j + 1;
+				}
+
+				//  Si la clause a un litteral VRAI, elle est satisfaite  on passe
+				if (nb_vrai == 0) {
+					//  Si la clause a un conflit (toutes les variables assignees a faux)
+					if (nb_faux > 0 && nb_undef == 0) {
+						print("CONFLIT : Clause ");
+						print(i);
+						print(" est fausse !\n");
+						conflit = 1;
+					}
+					else {
+						//  Clause unitaire : 1 variable non assignee, toutes les autres sont fausses
+						if (nb_undef == 1 && nb_faux == (nb_traitees - 1)) {
+							int forced_value = undef_sign;  // 1 si positif, 0 si negatif
+
+							// Verifier si deja assigne a une valeur differente
+							if (this.assignment[undef_var] != this._UNASSIGNED &&
+								this.assignment[undef_var] != forced_value) {
+								print("CONFLIT : x");
+								print(undef_var);
+								print(" deja assigne a ");
+								print(this.assignment[undef_var]);
+								print(" mais on veut ");
+								print(forced_value);
+								print("\n");
+								conflit = 1;
+							}
+							else {
+								// Assigner la valeur forcee
+								if (this.assignment[undef_var] == this._UNASSIGNED) {
+									this.assignment[undef_var] = forced_value;
+									changed = 1;
+									print("Propagation : x");
+									print(undef_var);
+									print(" = ");
+									print(forced_value);
+									print(" (clause ");
+									print(i);
+									print(")\n");
+								}
+								 
+							}
+						}
+						 
+					}
+				}
+				 
+				// Si nb_vrai > 0, on ne fait rien (clause deja satisfaite)
+
+				// Si conflit, on sort de la boucle for
+				if (conflit == 1) {
+					i = this.size;  // sortir de la boucle for
+				}
+				 
+			}
+		}
+
+		if (conflit == 1) {
+			return 0;  // Conflit detecte
+		}
+		 
+		return 1;  // Propagation terminee avec succes
+	}
+
+	func void subSolve2S(int index) {
+		if (index == this.size_var) {
+			if (this.IsSatisfyA(this.size) == 1) {
+				this.satisfy = 1;
+				println("Solution trouvee !");
+
+				print("Assignation : ");
+				for (int i = 0; i < this.size_var; i += 1) {
+					print("x");
+					print(i);
+					print("=");
+					print(this.assignment[i]);
+					if (i < this.size_var - 1) {
+						print(", ");
+					}
+					 
+				}
+				println("");
+				println("Verification des clauses :");
+				for (int i = 0; i < this.size; i += 1) {
+					Clause cl = this.clause[i];
+					print("Clause ");
+					print(i);
+					print(" : (");
+					if (cl->getSA() == 1) {
+						print(this.assignment[cl->getA()]);
+					}
+					else {
+						print(1 - this.assignment[cl->getA()]);
+					}
+					print(" v ");
+					if (cl->getSB() == 1) {
+						print(this.assignment[cl->getB()]);
+					}
+					else {
+						print(1 - this.assignment[cl->getB()]);
+					}
+					print(" v ");
+					if (cl->getSC() == 1) {
+						print(this.assignment[cl->getC()]);
+					}
+					else {
+						print(1 - this.assignment[cl->getC()]);
+					}
+					println(")");
+				}
+			}
+			 
+			this.num_solver = this.num_solver + 1;
+			return;
+		}
+		 
+
+		if (this.satisfy == 0) {
+			this.assignment[index] = 1;
+			int propage_ok = 1;
+
+			// Verifier s'il y a des variables non assignees avant de propager
+			int a_des_undef = 0;
+			for (int i = 0; i < this.size_var; i += 1) {
+				if (this.assignment[i] == this._UNASSIGNED) {
+					a_des_undef = 1;
+					i = this.size_var;
+				}
+				 
+			}
+
+			if (a_des_undef == 1) {
+				propage_ok = this.propager();
+			}
+			 
+
+			if (propage_ok == 1) {
+				int next = -1;
+				for (int i = index + 1; i < this.size_var; i += 1) {
+					if (this.assignment[i] == this._UNASSIGNED) {
+						next = i;
+						i = this.size_var;
+					}
+					 
+				}
+				if (next == -1) {
+					if (this.IsSatisfyA(this.size) == 1) {
+						this.satisfy = 1;
+						println("Solution trouvee !");
+
+						print("Assignation : ");
+						for (int i = 0; i < this.size_var; i += 1) {
+							print("x");
+							print(i);
+							print("=");
+							print(this.assignment[i]);
+							if (i < this.size_var - 1) {
+								print(", ");
+							}
+							 
+						}
+						println("");
+						println("Verification des clauses :");
+						for (int i = 0; i < this.size; i += 1) {
+							Clause cl = this.clause[i];
+							print("Clause ");
+							print(i);
+							print(" : (");
+							if (cl->getSA() == 1) {
+								print(this.assignment[cl->getA()]);
+							}
+							else {
+								print(1 - this.assignment[cl->getA()]);
+							}
+							print(" v ");
+							if (cl->getSB() == 1) {
+								print(this.assignment[cl->getB()]);
+							}
+							else {
+								print(1 - this.assignment[cl->getB()]);
+							}
+							print(" v ");
+							if (cl->getSC() == 1) {
+								print(this.assignment[cl->getC()]);
+							}
+							else {
+								print(1 - this.assignment[cl->getC()]);
+							}
+							println(")");
+						}
+					}
+					 
+					this.num_solver = this.num_solver + 1;
+				}
+				else {
+					this.subSolve2(next);
+				}
+			}
+			 
+		}
+		 
+
+		if (this.satisfy == 0) {
+			for (int i = 0; i < this.size_var; i += 1) {
+				this.assignment[i] = this._UNASSIGNED;
+			}
+			for (int i = 0; i <= index; i += 1) {
+				this.assignment[i] = 0;
+			}
+
+			int propage_ok = 1;
+			int a_des_undef = 0;
+			for (int i = 0; i < this.size_var; i += 1) {
+				if (this.assignment[i] == this._UNASSIGNED) {
+					a_des_undef = 1;
+					i = this.size_var;
+				}
+				 
+			}
+
+			if (a_des_undef == 1) {
+				propage_ok = this.propager();
+			}
+			 
+
+			if (propage_ok == 1) {
+				int next = -1;
+				for (int i = index + 1; i < this.size_var; i += 1) {
+					if (this.assignment[i] == this._UNASSIGNED) {
+						next = i;
+						i = this.size_var;
+					}
+					 
+				}
+				if (next == -1) {
+					if (this.IsSatisfyA(this.size) == 1) {
+						this.satisfy = 1;
+						println("Solution trouvee !");
+
+						print("Assignation : ");
+						for (int i = 0; i < this.size_var; i += 1) {
+							print("x");
+							print(i);
+							print("=");
+							print(this.assignment[i]);
+							if (i < this.size_var - 1) {
+								print(", ");
+							}
+							 
+						}
+						println("");
+						println("Verification des clauses :");
+						for (int i = 0; i < this.size; i += 1) {
+							Clause cl = this.clause[i];
+							print("Clause ");
+							print(i);
+							print(" : (");
+							if (cl->getSA() == 1) {
+								print(this.assignment[cl->getA()]);
+							}
+							else {
+								print(1 - this.assignment[cl->getA()]);
+							}
+							print(" v ");
+							if (cl->getSB() == 1) {
+								print(this.assignment[cl->getB()]);
+							}
+							else {
+								print(1 - this.assignment[cl->getB()]);
+							}
+							print(" v ");
+							if (cl->getSC() == 1) {
+								print(this.assignment[cl->getC()]);
+							}
+							else {
+								print(1 - this.assignment[cl->getC()]);
+							}
+							println(")");
+						}
+					}
+					 
+					this.num_solver = this.num_solver + 1;
+				}
+				else {
+					this.subSolve2(next);
+				}
+			}
+			 
+		}
+		 
+	}
+
+	func void subSolve2(int index) {
+		if (index == this.size_var) {
+			if (this.IsSatisfyA(this.size) == 1) {
+				this.satisfy = 1;
+				println("Solution trouvee !");
+				print("Assignation : ");
+				for (int i = 0; i < this.size_var; i += 1) {
+					print("x");
+					print(i);
+					print("=");
+					print(this.assignment[i]);
+					if (i < this.size_var - 1) {
+						print(", ");
+					}
+					 
+				}
+				println("");
+				println("Verification des clauses :");
+				for (int i = 0; i < this.size; i += 1) {
+					Clause cl = this.clause[i];
+					print("Clause ");
+					print(i);
+					print(" : (");
+					if (cl->getSA() == 1) {
+						print(this.assignment[cl->getA()]);
+					}
+					else {
+						print(1 - this.assignment[cl->getA()]);
+					}
+					print(" v ");
+					if (cl->getSB() == 1) {
+						print(this.assignment[cl->getB()]);
+					}
+					else {
+						print(1 - this.assignment[cl->getB()]);
+					}
+					print(" v ");
+					if (cl->getSC() == 1) {
+						print(this.assignment[cl->getC()]);
+					}
+					else {
+						print(1 - this.assignment[cl->getC()]);
+					}
+					println(")");
+				}
+			}
+			 
+			this.num_solver = this.num_solver + 1;
+			return;
+		}
+		 
+
+	
+		int* saved = new int[this.size_var];
+		for (int i = 0; i < this.size_var; i += 1) {
+			saved[i] = this.assignment[i];
+		}
+
+		// BRANCHE 1 : essayer 1
+		if (this.satisfy == 0) {
+			this.assignment[index] = 1;
+			int propage_ok = 1;
+			if (index + 1 < this.size_var) {
+				propage_ok = this.propager();
+			}
+			 
+			if (propage_ok == 1) {
+				int next = -1;
+				for (int i = index + 1; i < this.size_var; i += 1) {
+					if (this.assignment[i] == this._UNASSIGNED) {
+						next = i;
+						i = this.size_var;
+					}
+					 
+				}
+				if (next == -1) {
+					if (this.IsSatisfyA(this.size) == 1) {
+						this.satisfy = 1;
+						println("Solution trouvee !");
+						print("Assignation : ");
+						for (int i = 0; i < this.size_var; i += 1) {
+							print("x");
+							print(i);
+							print("=");
+							print(this.assignment[i]);
+							if (i < this.size_var - 1) {
+								print(", ");
+							}
+							 
+						}
+						println("");
+						println("Verification des clauses :");
+						for (int i = 0; i < this.size; i += 1) {
+							Clause cl = this.clause[i];
+							print("Clause ");
+							print(i);
+							print(" : (");
+							if (cl->getSA() == 1) {
+								print(this.assignment[cl->getA()]);
+							}
+							else {
+								print(1 - this.assignment[cl->getA()]);
+							}
+							print(" v ");
+							if (cl->getSB() == 1) {
+								print(this.assignment[cl->getB()]);
+							}
+							else {
+								print(1 - this.assignment[cl->getB()]);
+							}
+							print(" v ");
+							if (cl->getSC() == 1) {
+								print(this.assignment[cl->getC()]);
+							}
+							else {
+								print(1 - this.assignment[cl->getC()]);
+							}
+							println(")");
+						}
+					}
+					 
+					this.num_solver = this.num_solver + 1;
+				}
+				else {
+					this.subSolve2(next);
+				}
+			}
+			else {
+				// PROPAGATION ECHOUEE (conflit) -> on restaure et on essaie 0
+			}
+		}
+		 
+
+		// RESTAURER L'ETAT pour la branche 0 (BACKTRACKING)
+		if (this.satisfy == 0) {
+			for (int i = 0; i < this.size_var; i += 1) {
+				this.assignment[i] = saved[i];
+			}
+
+			// BRANCHE 2 : essayer 0
+			this.assignment[index] = 0;
+			int propage_ok = 1;
+			if (index + 1 < this.size_var) {
+				propage_ok = this.propager();
+			}
+			 
+			if (propage_ok == 1) {
+				int next = -1;
+				for (int i = index + 1; i < this.size_var; i += 1) {
+					if (this.assignment[i] == this._UNASSIGNED) {
+						next = i;
+						i = this.size_var;
+					}
+					 
+				}
+				if (next == -1) {
+					if (this.IsSatisfyA(this.size) == 1) {
+						this.satisfy = 1;
+						println("Solution trouvee !");
+						print("Assignation : ");
+						for (int i = 0; i < this.size_var; i += 1) {
+							print("x");
+							print(i);
+							print("=");
+							print(this.assignment[i]);
+							if (i < this.size_var - 1) {
+								print(", ");
+							}
+							 
+						}
+						println("");
+						println("Verification des clauses :");
+						for (int i = 0; i < this.size; i += 1) {
+							Clause cl = this.clause[i];
+							print("Clause ");
+							print(i);
+							print(" : (");
+							if (cl->getSA() == 1) {
+								print(this.assignment[cl->getA()]);
+							}
+							else {
+								print(1 - this.assignment[cl->getA()]);
+							}
+							print(" v ");
+							if (cl->getSB() == 1) {
+								print(this.assignment[cl->getB()]);
+							}
+							else {
+								print(1 - this.assignment[cl->getB()]);
+							}
+							print(" v ");
+							if (cl->getSC() == 1) {
+								print(this.assignment[cl->getC()]);
+							}
+							else {
+								print(1 - this.assignment[cl->getC()]);
+							}
+							println(")");
+						}
+					}
+					 
+					this.num_solver = this.num_solver + 1;
+				}
+				else {
+					this.subSolve2(next);
+				}
+			}
+			else {
+				// PROPAGATION ECHOUEE -> on ne fait rien (backtracking naturel)
+			}
+		}
+		 
+
+		free(saved);
+	}
+
+	func void subSolve(int index) {
+
+		if (index == this.size_var) {
+			print(this.num_solver);
+			for (int i = 0; i < this.size; i = i + 1) {
+				Clause c = this.clause[i];
+				  
+				print("(");
+				print(this.solver[c->getA()]);
+				print(",");
+				print(this.solver[c->getB()]);
+				print(",");
+				print(this.solver[c->getC()]);
+				print(")&");
+
+				
+			}
+			println("");
+
+			int s = this.IsSatisfy(this.size);
+			if (s == 1) {
+				this.satisfy = 1;
+				println("satisfy");
+
+				for (int i = 0; i < this.size; i += 1) {
+					Clause cl = this.clause[i];
+					int tmp = 0;
+					print(i);
+					print("(");
+					if (cl->getSA() == 1) {
+						tmp = this.solver[cl->getA()];
+					}
+					else {
+						tmp = 1 - this.solver[cl->getA()];
+					}
+					print(tmp);
+					print(" v ");
+					if (cl->getSB() == 1) {
+						tmp = this.solver[cl->getB()];
+					}
+					else {
+						tmp = (1 - this.solver[cl->getB()]);
+					}
+					print(tmp);
+					print(" v ");
+
+					if (cl->getSC() == 1) {
+						tmp = this.solver[cl->getC()];
+					}
+					else {
+						tmp = (1 - this.solver[cl->getC()]);
+					}
+					print(tmp);
+					println(")");
+									
+
+				}
+			}
+			else {
+				println("not satisfy");
+			}
+
+			this.num_solver = this.num_solver + 1;
+
+			return;
+
+		}
+		else {
+
+		}
+
+		if (this.satisfy == 0) {
+			this.solver[index] = 1;
+			this.subSolve(index + 1);
+		}
+		else{}
+
+		if (this.satisfy == 0) {
+			this.solver[index] = 0;
+			this.subSolve(index + 1);
+		}
+		else{}
+
+		
+
+	}
+
+	func void Solve() {
+		int sz = this.size_var;
+		for (int i = 0; i < sz; i = i + 1) {
+			this.solver[i] = 0;
+		}
+		this.satisfy = 0;
+		this.num_solver = 0;
+		print("solver=");
+		this.subSolve(0);
+		if (this.satisfy == 0) {
+			println("Aucune solution.");
+		}
+		 
+	}
+
+	func void SolveFast() {
+		int sz = this.size_var;
+		for (int i = 0; i < sz; i = i + 1) {
+			this.assignment[i] = -1;
+		}
+		this.satisfy = 0;
+		this.num_solver = 0;
+		print("solver=");
+		this.subSolve2(0);
+		print("satisfy=");
+		println(this.satisfy);
+		if (this.satisfy == 0) {
+			println("Aucune solution.");
+		}
+		 
+
+
+	}
+
+	func void Display() {
+		println("Solver 3SAT");
+		for (int i = 0; i < this.size; i += 1) {
+			Clause c = this.clause[i];
+			print("clause = ");
+			print(i);
+			print(" ");
+			c->Display();
+
+		}
+	}
+
+}
+
+
+func void main() {
+
+	//seed 42 1585 size 50 nb_var 20
+	Random rand = Random(1985, 1000000);
+
+	int size = 350;
+	Clause* cl = new Clause[size];
+	
+
+	int nb_var = 150;
+	int* var = new int[nb_var];
+
+	for (int i = 0; i < size; i += 1) {
+		cl[i] = Clause(rand->little_rand() % nb_var, rand->little_rand() % nb_var, rand->little_rand() % nb_var, rand->little_rand() % 2, rand->little_rand() % 2, rand->little_rand() % 2);
+	
+	}
+
+	/*int solution[20];
+	solution[0] = 1; solution[1] = 0; solution[2] = 1; solution[3] = 1; solution[4] = 0;
+	solution[5] = 1; solution[6] = 0; solution[7] = 1; solution[8] = 0; solution[9] = 1;
+	solution[10] = 1; solution[11] = 0; solution[12] = 1; solution[13] = 0; solution[14] = 1;
+	solution[15] = 0; solution[16] = 1; solution[17] = 1; solution[18] = 0; solution[19] = 1;
+
+	for (int i = 0; i < size; i += 1) {
+		int a = rand->little_rand() % nb_var;
+		int b = rand->little_rand() % nb_var;
+		int c = rand->little_rand() % nb_var;
+
+		
+		int sa = solution[a];  
+		int sb = solution[b];
+		int sc = solution[c];
+
+
+		cl[i] = Clause(a, b, c, sa, sb, sc);
+	}*/
+
+	/*satisfiable
+	cl[0] = Clause(0, 1, 2, 1, 1, 1);  // utilise les variables 0, 1 et 2
+	cl[1] = Clause(0, 1, 2, 0, 1, 1);  // utilise les variables 0, 1 et 2
+	*/
+
+	/*insatisfiable
+	cl[0] = Clause(0, 0, 0, 1, 1, 1);
+
+	cl[1] = Clause(0, 0, 0, 0, 0, 0);
+	*/
+
+
+	for (int i = 0; i < size; i += 1) {
+		Clause c = cl[i];
+		print("clause = ");
+		print(i);
+		print(" ");
+		c.Display();
+		
+	}
+
+
+	_3SAT_Solver sat = _3SAT_Solver(size, var, nb_var);
+
+	int index = 0;
+	for (int i = 0; i < size; i += 1) {
+		sat->AddClause(index, cl[i]);
+		index += 1;
+	}
+	sat->Display();
+	sat->SolveFast();
+
+	free(cl);
+	free(var);
+}

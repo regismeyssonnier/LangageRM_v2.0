@@ -2075,7 +2075,7 @@ class CompilateurLLVM(RmLangVisitor):
         type_elem: type LLVM des éléments (i32, i8, etc.)
         nb_elements: nombre d'éléments (Value LLVM i32)
         """
-       
+   
         # Calculer la taille d'un élément en octets
         if isinstance(type_elem, ir.IntType):
             taille_elem = type_elem.width // 8
@@ -2083,49 +2083,64 @@ class CompilateurLLVM(RmLangVisitor):
             taille_elem = 4
         elif isinstance(type_elem, ir.DoubleType):
             taille_elem = 8
+        elif isinstance(type_elem, ir.PointerType):
+            taille_elem = 8  # Pointeur 64 bits
+        elif isinstance(type_elem, (ir.LiteralStructType, ir.IdentifiedStructType)):
+            # Calculer la taille de la structure avec get_abi_size
+            try:
+                td = binding.create_target_data(self.module.data_layout)
+                taille_elem = type_elem.get_abi_size(td)
+            except:
+                # Fallback : additionner les tailles des champs
+                taille_elem = 0
+                for element in type_elem.elements:
+                    if isinstance(element, ir.IntType):
+                        taille_elem += element.width // 8
+                    elif isinstance(element, ir.FloatType):
+                        taille_elem += 4
+                    elif isinstance(element, ir.DoubleType):
+                        taille_elem += 8
+                    elif isinstance(element, ir.PointerType):
+                        taille_elem += 8
+                    elif isinstance(element, (ir.LiteralStructType, ir.IdentifiedStructType)):
+                        taille_elem += 8  # Estimation
+                    else:
+                        taille_elem += 8
         else:
-            taille_elem = 1
-    
+            taille_elem = 8  # Par défaut
+
         # DEBUG
-        print(f"[DEBUG] _allouer_tableau_malloc: type_elem={type_elem}, nb_elements={nb_elements}, type(nb_elements)={type(nb_elements)}")
+        print(f"[DEBUG] _allouer_tableau_malloc: type_elem={type_elem}, nb_elements={nb_elements}, taille_elem={taille_elem}")
         if hasattr(nb_elements, 'type'):
             print(f"[DEBUG] nb_elements.type={nb_elements.type}")
-        print(f"[DEBUG] taille_elem={taille_elem}")
-    
+
         # S'assurer que nb_elements est un Value i32
         if isinstance(nb_elements, int):
             nb_elements = ir.Constant(ir.IntType(32), nb_elements)
-            print(f"[DEBUG] nb_elements converti en Constant i32")
-    
+
         # Si nb_elements n'est pas i32, le convertir
         if hasattr(nb_elements, 'type') and nb_elements.type != ir.IntType(32):
-            print(f"[DEBUG] Conversion de {nb_elements.type} vers i32")
             nb_elements = self.builder.zext(nb_elements, ir.IntType(32))
-    
+
         # Calculer taille totale
         const_taille_elem = ir.Constant(ir.IntType(32), taille_elem)
         taille_totale = self.builder.mul(nb_elements, const_taille_elem)
-    
-        print(f"[DEBUG] taille_totale.type={taille_totale.type}")
-    
+
         # Convertir en i64
         taille_i64 = self.builder.zext(taille_totale, ir.IntType(64))
-    
-        print(f"[DEBUG] taille_i64.type={taille_i64.type}")
-        print(f"[DEBUG] malloc type args: {[arg.type for arg in self.malloc.args]}")
-    
+
         # Appeler malloc
         ptr_i8 = self.builder.call(self.malloc, [taille_i64])
-    
+
         # Convertir vers le bon type
         ptr_type = ir.PointerType(type_elem)
         ptr = self.builder.bitcast(ptr_i8, ptr_type)
-    
+
         # Enregistrer pour libération
         if not hasattr(self, 'free_all_malloc'):
             self.free_all_malloc = []
         self.free_all_malloc.append(ptr_i8)
-    
+
         return ptr
 
     def visitNewArrayExpr(self, ctx):
@@ -3314,52 +3329,8 @@ class CompilateurLLVM(RmLangVisitor):
 
         return None
     
-    def visitANC564545Condition(self, ctx):
-        expressions = ctx.expression()
-        blocs = ctx.bloc()
-        nb_conditions = len(expressions)
-        has_else = ctx.ELSE() is not None
-
-        end_block = self.builder.append_basic_block("if_end")
-
-        for i in range(nb_conditions):
-            condition = self.visit(expressions[i])
-            cond = self._to_bool(condition)
-
-            then_block = self.builder.append_basic_block(f"if_then_{i}")
-
-            if i == nb_conditions - 1:
-                if has_else:
-                    next_block = self.builder.append_basic_block("if_else")
-                else:
-                    next_block = end_block
-            else:
-                next_block = self.builder.append_basic_block(f"if_next_{i}")
-
-            self.builder.cbranch(cond, then_block, next_block)
-
-            self.builder.position_at_start(then_block)
-            self.visit(blocs[i])
-            if not self.builder.block.is_terminated:
-                self.builder.branch(end_block)
-
-            self.builder.position_at_start(next_block)
-
-        # SEULEMENT si un else existe : on est dans le bloc "if_else",
-        # il faut le remplir puis le refermer vers end_block.
-        if has_else:
-            else_bloc = blocs[-1]
-            if else_bloc is not None:
-                self.visit(else_bloc)
-                if not self.builder.block.is_terminated:
-                    self.builder.branch(end_block)
-
-        # Si pas de else : next_block == end_block, on y est déjà, rien à faire de plus.
-
-        self.builder.position_at_start(end_block)
-        return None
-
-    def visitCondition(self, ctx):
+    
+    def ooovisitCondition(self, ctx):
         expressions = ctx.expression()
         blocs = ctx.bloc()
         nb_conditions = len(expressions)
@@ -3411,6 +3382,47 @@ class CompilateurLLVM(RmLangVisitor):
                     self.builder.branch(end_block)
 
         # Positionner à la fin
+        self.builder.position_at_start(end_block)
+        return None
+
+    def visitCondition(self, ctx):
+        expressions = ctx.expression()
+        blocs = ctx.bloc()
+        nb_conditions = len(expressions)
+        has_else = len(blocs) > nb_conditions   # CORRIGÉ : ctx.ELSE() est une LISTE, jamais None
+
+        then_blocks = [self.builder.append_basic_block(f"if_then_{i}") for i in range(nb_conditions)]
+
+        next_blocks = []
+        for i in range(nb_conditions - 1):
+            next_blocks.append(self.builder.append_basic_block(f"if_next_{i}"))
+
+        end_block = self.builder.append_basic_block("if_end")
+
+        if has_else:
+            else_block = self.builder.append_basic_block("if_else")
+            next_blocks.append(else_block)
+        else:
+            next_blocks.append(end_block)
+
+        for i in range(nb_conditions):
+            condition = self.visit(expressions[i])
+            cond = self._to_bool(condition)
+
+            self.builder.cbranch(cond, then_blocks[i], next_blocks[i])
+
+            self.builder.position_at_start(then_blocks[i])
+            self.visit(blocs[i])
+            if not self.builder.block.is_terminated:
+                self.builder.branch(end_block)
+
+            self.builder.position_at_start(next_blocks[i])
+
+        if has_else:
+            self.visit(blocs[-1])
+            if not self.builder.block.is_terminated:
+                self.builder.branch(end_block)
+
         self.builder.position_at_start(end_block)
         return None
     
