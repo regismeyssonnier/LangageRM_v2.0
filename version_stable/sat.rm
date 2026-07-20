@@ -90,7 +90,7 @@ class Clause {
 		this.sa = sa;
 	}
 
-	func void setSB(int sSb) {
+	func void setSB(int sb) {
 		this.sb = sb;
 	}
 
@@ -191,7 +191,7 @@ class _3SAT_Solver {
 		return res;
 	}
 
-	func int IsSatisfyA(int size) {
+	func int ooIsSatisfyA(int size) {
 		int res = -1;
 
 		for (int i = 0; i < size; i += 1) {
@@ -234,7 +234,51 @@ class _3SAT_Solver {
 		return res;
 	}
 
-	func int propager() {
+	func int IsSatisfyA(int size) {
+
+		for (int i = 0; i < size; i += 1) {
+
+			Clause cl = this.clause[i];
+
+			int va = 0;
+			int vb = 0;
+			int vc = 0;
+
+			// Litteral A
+			if (cl->getSA() == 1) {
+				va = this.assignment[cl->getA()];
+			}
+			else {
+				va = 1 - this.assignment[cl->getA()];
+			}
+
+			// Litteral B
+			if (cl->getSB() == 1) {
+				vb = this.assignment[cl->getB()];
+			}
+			else {
+				vb = 1 - this.assignment[cl->getB()];
+			}
+
+			// Litteral C
+			if (cl->getSC() == 1) {
+				vc = this.assignment[cl->getC()];
+			}
+			else {
+				vc = 1 - this.assignment[cl->getC()];
+			}
+
+
+			// La clause est fausse si les 3 litteraux sont faux
+			if ((va == 0) && (vb == 0) && (vc == 0)) {
+				return 0;
+			}
+		}
+
+		return 1;
+	}
+
+	func int propagerANc() {
 		int changed = 1;
 		int conflit = 0;
 
@@ -603,6 +647,131 @@ class _3SAT_Solver {
 		 
 	}
 
+	func int propager() {
+		int changed = 1;
+		int conflit = 0;
+
+		while ((changed == 1) && (conflit == 0)) {
+			changed = 0;
+
+			for (int i = 0; i < this.size; i += 1) {
+				Clause c = this.clause[i];
+
+				int vars[3];
+				int signs[3];
+				vars[0] = c->getA();
+				signs[0] = c->getSA();
+				vars[1] = c->getB();
+				signs[1] = c->getSB();
+				vars[2] = c->getC();
+				signs[2] = c->getSC();
+
+				int nb_undef = 0;
+				int undef_var = -1;
+				int undef_sign = 0;
+				int nb_faux = 0;
+				int nb_vrai = 0;
+
+				int deja_traitees[3];
+				deja_traitees[0] = -1;
+				deja_traitees[1] = -1;
+				deja_traitees[2] = -1;
+				int nb_traitees = 0;
+
+				int j = 0;
+				while (j < 3) {
+					int var = vars[j];
+					int sign = signs[j];
+
+					int deja_vue = 0;
+					int k = 0;
+					while (k < nb_traitees) {
+						if (deja_traitees[k] == var) {
+							deja_vue = 1;
+							k = nb_traitees;
+						}
+						k = k + 1;
+					}
+
+					if (deja_vue == 0) {
+						deja_traitees[nb_traitees] = var;
+						nb_traitees = nb_traitees + 1;
+
+						if (this.assignment[var] == this._UNASSIGNED) {
+							nb_undef = nb_undef + 1;
+							undef_var = var;
+							undef_sign = sign;
+						}
+						else {
+							if (this.assignment[var] == sign) {
+								nb_vrai = nb_vrai + 1;
+							}
+							else {
+								nb_faux = nb_faux + 1;
+							}
+						}
+					}
+
+					j = j + 1;
+				}
+
+				
+				if (nb_vrai > 0) {
+					
+				}
+				else {
+					
+					if (nb_faux > 0 && nb_undef == 0) {
+						print("CONFLIT : Clause ");
+						print(i);
+						print(" est fausse !\n");
+						conflit = 1;
+					}
+					else {
+						
+						if (nb_undef == 1 && nb_faux == (nb_traitees - 1)) {
+							int forced_value = undef_sign;
+
+							if (this.assignment[undef_var] != this._UNASSIGNED &&
+								this.assignment[undef_var] != forced_value) {
+								print("CONFLIT : x");
+								print(undef_var);
+								print(" deja assigne a ");
+								print(this.assignment[undef_var]);
+								print(" mais on veut ");
+								print(forced_value);
+								print("\n");
+								conflit = 1;
+							}
+							else {
+								if (this.assignment[undef_var] == this._UNASSIGNED) {
+									this.assignment[undef_var] = forced_value;
+									changed = 1;
+									print("Propagation : x");
+									print(undef_var);
+									print(" = ");
+									print(forced_value);
+									print(" (clause ");
+									print(i);
+									print(")\n");
+								}
+							}
+						}
+					}
+				}
+
+				if (conflit == 1) {
+					i = this.size;
+				}
+			}
+		}
+
+		if (conflit == 1) {
+			return 0;
+		}
+		return 1;
+	}
+
 	func void subSolve2(int index) {
 		if (index == this.size_var) {
 			if (this.IsSatisfyA(this.size) == 1) {
@@ -940,6 +1109,14 @@ class _3SAT_Solver {
 
 	}
 
+	func void GetAssignationVar(int *idx, int *ass, int sz) {
+
+		for (int i = 0; i < sz; i += 1) {
+			ass[i] = this.assignment[idx[i]];
+		}
+
+	}
+
 	func void Display() {
 		println("Solver 3SAT");
 		for (int i = 0; i < this.size; i += 1) {
@@ -954,57 +1131,235 @@ class _3SAT_Solver {
 
 }
 
+class CreationClause {
+	Clause* clause;
+	int index_clause;
+	int index_var;
+	int* var;
+	constructor CreationClause(Clause *cl, int *v, int nb_var) {
+		this.clause = cl;
+		this.index_clause = 0;
+		this.var = v;
+		this.index_var = nb_var;
+	}
+
+	func void Add1Sat(int idxa, int sidxa) {
+		this.clause[this.index_clause] = Clause(idxa, this.index_var, this.index_var, sidxa, 1, 1);
+		this.index_clause = this.index_clause + 1;
+		this.clause[this.index_clause] = Clause(idxa, this.index_var, this.index_var, sidxa, 0, 0);
+		this.index_clause = this.index_clause + 1;
+		this.index_var = this.index_var + 1;
+	}
+
+	func void Add2Sat(int idxa, int idxb, int sidxa, int sidxb) {
+		this.clause[this.index_clause] = Clause(idxa, idxb, this.index_var, sidxa, sidxb, 1);
+		this.index_clause = this.index_clause + 1;
+		this.clause[this.index_clause] = Clause(idxa, idxb, this.index_var, sidxa, sidxb, 0);
+		this.index_clause = this.index_clause + 1;
+
+		this.index_var = this.index_var + 1;
+	}
+
+	func void Add3Sat(int idxa, int idxb, int idxc, int sidxa, int sidxb, int sidxc) {
+		this.clause[this.index_clause] = Clause(idxa, idxb, idxc, sidxa, sidxb, sidxc);
+		this.index_clause = this.index_clause + 1;
+	}
+
+	func void Add4Sat(int idxa, int idxb, int idxc, int idxd, int sidxa, int sidxb, int sidxc, int sidxd) {
+		this.clause[this.index_clause] = Clause(idxa, idxb, this.index_var, sidxa, sidxb, 1);
+		this.index_clause = this.index_clause + 1;
+
+		this.clause[this.index_clause] = Clause(idxc, idxd, this.index_var, sidxc, sidxd, 0);
+		this.index_clause = this.index_clause + 1;
+
+		this.index_var = this.index_var + 1;
+
+	}
+
+	func void AddKSat(int* vars, int* signs, int k) {
+		// k litteraux -> k-2 clauses de 3 litteraux
+
+		if (k == 1) {
+			this.Add1Sat(vars[0], signs[0]);
+			return;
+		}
+		if (k == 2) {
+			this.Add2Sat(vars[0], vars[1], signs[0], signs[1]);
+			return;
+		}
+		if (k == 3) {
+			this.Add3Sat(vars[0], vars[1], vars[2], signs[0], signs[1], signs[2]);
+			return;
+		}
+
+		// k >= 4
+		int z_prev = -1;
+
+		// Premiere clause : (L1 v L2 v z1)
+		int z1 = this.index_var;
+		this.index_var = this.index_var + 1;
+		this.clause[this.index_clause] = Clause(vars[0], vars[1], z1, signs[0], signs[1], 1);
+		this.index_clause = this.index_clause + 1;
+		z_prev = z1;
+
+		// Clauses intermediaires : (nz_i v L_{i+2} v z_{i+1})
+		for (int i = 2; i < k - 2; i += 1) {
+			int z_next = this.index_var;
+			this.index_var = this.index_var + 1;
+			this.clause[this.index_clause] = Clause(z_prev, vars[i], z_next, 0, signs[i], 1);
+			this.index_clause = this.index_clause + 1;
+			z_prev = z_next;
+		}
+
+		// Derniere clause : (nz_{k-3} v L_{k-1} v L_k)
+		this.clause[this.index_clause] = Clause(z_prev, vars[k - 2], vars[k - 1], 0, signs[k - 2], signs[k - 1]);
+		this.index_clause = this.index_clause + 1;
+	}
+
+	func void AddXor(int a, int b, int c) {
+		this.Add3Sat(a, b, c, 1, 1, 0);
+		this.Add3Sat(a, b, c, 1, 0, 1);
+		this.Add3Sat(a, b, c, 0, 1, 1);
+		this.Add3Sat(a, b, c, 0, 0, 0);
+	}
+
+	func void AddAnd(int a, int b, int c) {
+
+		this.Add3Sat(a, b, c, 1, 1, 0); 
+		this.Add3Sat(a, b, c, 1, 0, 0); 
+		this.Add3Sat(a, b, c, 0, 1, 0);  
+		this.Add3Sat(a, b, c, 0, 0, 1);  
+	}
+
+	func void AddOr(int a, int b, int c) {
+		this.Add3Sat(a, b, c, 1, 1, 0);
+		this.Add3Sat(a, b, c, 1, 0, 1);
+		this.Add3Sat(a, b, c, 0, 1, 1);
+		this.Add3Sat(a, b, c, 0, 0, 1);
+	}
+
+	func void AddAddBin(int a, int b, int res, int ret, int retenue) {
+		// Variables intermediaires
+		int s = this.index_var;
+		this.index_var = s + 1;
+		int r = this.index_var;
+		this.index_var = r + 1;
+		int t = this.index_var;
+		this.index_var = t + 1;
+
+		this.AddXor(a, b, s);
+		this.AddAnd(a, b, r);
+
+		this.AddXor(s, ret, res);
+		this.AddAnd(s, ret, t);
+
+		this.AddOr(r, t, retenue);
+	}
+
+	func int GetMaxClause() {
+		return this.index_clause;
+	}
+
+	func int GetMaxVar() {
+		return this.index_var;
+	}
+
+	func Clause* GetClause() {
+		return this.clause;
+	}
+
+}
+
+
 
 func void main() {
 
 	//seed 42 1585 size 50 nb_var 20
 	Random rand = Random(1985, 1000000);
 
-	int size = 350;
+	int size = 500;
 	Clause* cl = new Clause[size];
 	
 
-	int nb_var = 150;
-	int* var = new int[nb_var];
+	int nb_var = 3;
+	int* var = new int[500];
 
-	for (int i = 0; i < size; i += 1) {
+	/*for (int i = 0; i < size; i += 1) {
 		cl[i] = Clause(rand->little_rand() % nb_var, rand->little_rand() % nb_var, rand->little_rand() % nb_var, rand->little_rand() % 2, rand->little_rand() % 2, rand->little_rand() % 2);
 	
-	}
-
-	/*int solution[20];
-	solution[0] = 1; solution[1] = 0; solution[2] = 1; solution[3] = 1; solution[4] = 0;
-	solution[5] = 1; solution[6] = 0; solution[7] = 1; solution[8] = 0; solution[9] = 1;
-	solution[10] = 1; solution[11] = 0; solution[12] = 1; solution[13] = 0; solution[14] = 1;
-	solution[15] = 0; solution[16] = 1; solution[17] = 1; solution[18] = 0; solution[19] = 1;
-
-	for (int i = 0; i < size; i += 1) {
-		int a = rand->little_rand() % nb_var;
-		int b = rand->little_rand() % nb_var;
-		int c = rand->little_rand() % nb_var;
-
-		
-		int sa = solution[a];  
-		int sb = solution[b];
-		int sc = solution[c];
-
-
-		cl[i] = Clause(a, b, c, sa, sb, sc);
 	}*/
 
-	/*satisfiable
-	cl[0] = Clause(0, 1, 2, 1, 1, 1);  // utilise les variables 0, 1 et 2
-	cl[1] = Clause(0, 1, 2, 0, 1, 1);  // utilise les variables 0, 1 et 2
+	int x00_1 = 0;
+	int x01_1 = 1;
+	int x10_1 = 2;
+	int x11_1 = 3;
+	int x00_2 = 4;
+	int x01_2 = 5;
+	int x10_2 = 6;
+	int x11_2 = 7;
+
+	int axor = 0;
+	int bxor = 1;
+	int cxor = 2;
+
+
+
+	int* a = new int[32];
+	int* b = new int[32];
+	int* res = new int[32];
+	int* ret = new int[33];
+	
+	for (int i = 0; i < 32; i += 1) {
+		a[i] = i;
+		b[i] = 32 + i;
+		res[i] = 64 + i;
+		ret[i] = 96 + i;
+		
+	}
+	ret[32] = 128;
+
+	CreationClause sat_rules = CreationClause(cl, var, 129);
+
+	
+	/*
+	sat_rules->AddXor(axor, bxor, cxor);
+
+	sat_rules->Add1Sat(axor, 0);
+	sat_rules->Add1Sat(bxor, 1);
 	*/
+			
+	
+	sat_rules->Add1Sat(ret[0], 0);
 
-	/*insatisfiable
-	cl[0] = Clause(0, 0, 0, 1, 1, 1);
+	
+	for (int i = 0; i < 32; i += 1) {
+		sat_rules->AddAddBin(a[i], b[i], res[i], ret[i], ret[i+1]);
+	}
 
-	cl[1] = Clause(0, 0, 0, 0, 0, 0);
-	*/
+	int _a = 213456789;
+	int _b = 123456789;
+	
+	for (int i = 0; i < 32; i += 1) {
+		int n = (_a >> i) & 1;
+		print(n);
+		sat_rules->Add1Sat(a[i], n);
+		
+	}println("");
+
+	for (int i = 0; i < 32; i += 1) {
+		int n = (_b >> i) & 1;
+		print(n);
+		sat_rules->Add1Sat(b[i], n);
+		
+	}println("");
+	
+	int nb_var_total = sat_rules->GetMaxVar();
+	println("nb_var_total = ");
+	println(nb_var_total);
+	println(sat_rules->GetMaxVar());
 
 
-	for (int i = 0; i < size; i += 1) {
+	for (int i = 0; i < sat_rules->GetMaxClause(); i += 1) {
 		Clause c = cl[i];
 		print("clause = ");
 		print(i);
@@ -1013,16 +1368,36 @@ func void main() {
 		
 	}
 
+	println("before");
+	// === CREER LE SOLVEUR ===
+	_3SAT_Solver sat = _3SAT_Solver(sat_rules->GetMaxClause(), var, sat_rules->GetMaxVar());
 
-	_3SAT_Solver sat = _3SAT_Solver(size, var, nb_var);
-
-	int index = 0;
-	for (int i = 0; i < size; i += 1) {
-		sat->AddClause(index, cl[i]);
-		index += 1;
+	println("Created clause");
+	for (int i = 0; i < sat_rules->GetMaxClause(); i += 1) {
+		sat->AddClause(i, cl[i]);
 	}
+
+
+
+	println("Added clause");
+
 	sat->Display();
 	sat->SolveFast();
+
+	int* ans = new int[32];
+	sat->GetAssignationVar(res, ans, 32);
+
+	int nb = 0;
+	for (int i = 31; i >= 0; i -= 1) {
+		nb += ans[i] * (1 << i);
+		print(ans[i]);
+		
+	}println("");
+
+	print("ans=");
+	println(nb);
+	int r = _a + _b;
+	println(r);
 
 	free(cl);
 	free(var);
